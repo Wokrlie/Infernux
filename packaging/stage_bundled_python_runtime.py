@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.request
 import zipfile
 
@@ -13,17 +15,12 @@ try:
 except ImportError:
     winreg = None
 
+from runtime_requirements import RUNTIME_PROFILE_VERSION, runtime_modules, runtime_packages
 
-_BUILDER_PACKAGES = [
-    "pip",
-    "setuptools",
-    "wheel",
-    "ordered-set",
-    "nuitka",
-    "Pillow",
-    "imageio",
-    "av",
-]
+_RUNTIME_PACKAGES = runtime_packages()
+_RUNTIME_MODULES = runtime_modules()
+_RUNTIME_PROFILE_FILENAME = ".infernux-runtime-profile.json"
+_BOOTSTRAP_ROOT = os.path.join(os.environ.get("SystemDrive", "C:"), "_InxRuntime")
 
 
 def _runtime_lib_names() -> list[str]:
@@ -126,18 +123,100 @@ def _has_dev_support(root: str) -> bool:
     return any(os.path.isfile(os.path.join(libs_dir, name)) for name in _runtime_lib_names())
 
 
+def _has_modules(python_exe: str, *module_names: str) -> bool:
+    checks = " and ".join(
+        [f"importlib.util.find_spec('{module_name}') is not None" for module_name in module_names]
+    ) or "1"
+    completed = _run(
+        [python_exe, "-c", f"import importlib.util; print(int({checks}))"],
+        timeout=60,
+    )
+    return completed.returncode == 0 and (completed.stdout or "").strip() == "1"
+
+
+def _runtime_profile_path(dest_root: str) -> str:
+    return os.path.join(os.path.dirname(dest_root), _RUNTIME_PROFILE_FILENAME)
+
+
+def _runtime_profile_payload() -> dict[str, object]:
+    installer_name, _installer_url = _runtime_installer_info_for_machine()
+    return {
+        "profile_version": RUNTIME_PROFILE_VERSION,
+        "source": "runtime-cache",
+        "python_installer": installer_name,
+        "packages": list(_RUNTIME_PACKAGES),
+    }
+
+
+def _profile_matches(dest_root: str) -> bool:
+    profile_path = _runtime_profile_path(dest_root)
+    if not os.path.isfile(profile_path):
+        return False
+
+    try:
+        with open(profile_path, "r", encoding="utf-8") as f:
+            profile = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    return profile == _runtime_profile_payload()
+
+
+def _write_runtime_profile(dest_root: str) -> None:
+    profile_path = _runtime_profile_path(dest_root)
+    tmp_path = profile_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(_runtime_profile_payload(), f, indent=2, sort_keys=True)
+        f.write("\n")
+    os.replace(tmp_path, profile_path)
+
+
+def _prune_runtime_root(dest_root: str) -> None:
+    for rel_path in (
+        "python.pdb",
+        "python312.pdb",
+        "pythonw.pdb",
+        os.path.join("Lib", "test"),
+        os.path.join("Lib", "idlelib"),
+        "Tools",
+    ):
+        abs_path = os.path.join(dest_root, rel_path)
+        if os.path.isdir(abs_path):
+            shutil.rmtree(abs_path, ignore_errors=True)
+        elif os.path.isfile(abs_path):
+            os.remove(abs_path)
+
+
+def _ensure_pip(python_exe: str) -> None:
+    completed = _run([python_exe, "-m", "pip", "--version"], timeout=60)
+    if completed.returncode == 0:
+        return
+
+    completed = _run([python_exe, "-m", "ensurepip", "--upgrade"], timeout=600)
+    if completed.returncode != 0:
+        raise SystemExit(
+            "Failed to bootstrap pip into the staged Python runtime.\n"
+            f"{(completed.stderr or completed.stdout or '').strip()}"
+        )
+
+
 def _ensure_builder_packages(root: str) -> None:
     target_python = _find_python_in_root(root)
     if not target_python:
         raise SystemExit(f"No python.exe found after preparing runtime: {root}")
+
+    _ensure_pip(target_python)
 
     completed = _run([
         target_python,
         "-m",
         "pip",
         "install",
+        "--disable-pip-version-check",
+        "--no-input",
+        "--prefer-binary",
         "--upgrade",
-        *_BUILDER_PACKAGES,
+        *_RUNTIME_PACKAGES,
     ], timeout=1800)
     if completed.returncode != 0:
         raise SystemExit(
@@ -145,15 +224,10 @@ def _ensure_builder_packages(root: str) -> None:
             f"{(completed.stderr or completed.stdout or '').strip()}"
         )
 
-    verify = _run([
-        target_python,
-        "-c",
-        "import pip, nuitka, PIL, imageio, av; print('ok')",
-    ], timeout=60)
-    if verify.returncode != 0:
+    if not _has_modules(target_python, *_RUNTIME_MODULES):
         raise SystemExit(
             "Python runtime was staged, but required builder packages are not importable.\n"
-            f"{(verify.stderr or verify.stdout or '').strip()}"
+            f"Required modules: {', '.join(_RUNTIME_MODULES)}"
         )
 
 
@@ -185,18 +259,20 @@ def _create_runtime_bundle(dest_root: str) -> None:
     os.replace(tmp_bundle, bundle_path)
 
 
-def _installer_cache_path(dest_root: str) -> str:
+def _installer_cache_path(cache_root: str) -> str:
     installer_name, _installer_url = _runtime_installer_info_for_machine()
-    return os.path.join(os.path.dirname(dest_root), installer_name)
+    return os.path.join(cache_root, installer_name)
 
 
-def _install_full_runtime(dest_root: str) -> None:
+def _install_full_runtime(dest_root: str, *, installer_cache_root: str | None = None) -> None:
     if sys.platform != "win32":
         raise SystemExit("Bundled full Python staging is only supported on Windows.")
 
     parent = os.path.dirname(dest_root)
     os.makedirs(parent, exist_ok=True)
-    installer_path = _installer_cache_path(dest_root)
+    cache_root = os.path.abspath(installer_cache_root) if installer_cache_root else parent
+    os.makedirs(cache_root, exist_ok=True)
+    installer_path = _installer_cache_path(cache_root)
     if not os.path.isfile(installer_path):
         _installer_name, installer_url = _runtime_installer_info_for_machine()
         print(f"Downloading official Python installer: {installer_url}")
@@ -224,6 +300,29 @@ def _install_full_runtime(dest_root: str) -> None:
             f"{(completed.stderr or completed.stdout or '').strip()}"
         )
 
+    python_exe = _find_python_in_root(dest_root)
+    if not python_exe or not _is_python312(python_exe) or _is_embedded_root(dest_root):
+        raise SystemExit(
+            "Python 3.12 installation completed, but a valid full python.exe was not found afterwards."
+        )
+
+
+def _stage_clean_runtime_fallback(dest_root: str) -> None:
+    os.makedirs(_BOOTSTRAP_ROOT, exist_ok=True)
+    bootstrap_dir = tempfile.mkdtemp(prefix="bundle-", dir=_BOOTSTRAP_ROOT)
+    bootstrap_root = os.path.join(bootstrap_dir, "python312")
+    installer_cache_root = os.path.dirname(dest_root)
+
+    try:
+        _install_full_runtime(bootstrap_root, installer_cache_root=installer_cache_root)
+        _ensure_builder_packages(bootstrap_root)
+        _prune_runtime_root(bootstrap_root)
+
+        shutil.rmtree(dest_root, ignore_errors=True)
+        shutil.copytree(bootstrap_root, dest_root)
+    finally:
+        shutil.rmtree(bootstrap_dir, ignore_errors=True)
+
 
 def _is_usable_full_runtime(root: str) -> bool:
     python_exe = _find_python_in_root(root)
@@ -232,8 +331,22 @@ def _is_usable_full_runtime(root: str) -> bool:
         and _is_python312(python_exe)
         and not _is_embedded_root(root)
         and _has_dev_support(root)
-        and _run([python_exe, "-c", "import pip, nuitka, PIL, imageio, av; print('ok')"], timeout=60).returncode == 0
+        and _has_modules(python_exe, *_RUNTIME_MODULES)
     )
+
+
+def _prepare_existing_runtime_cache(dest_root: str) -> bool:
+    python_exe = _find_python_in_root(dest_root)
+    if not python_exe or not _is_python312(python_exe) or _is_embedded_root(dest_root):
+        return False
+    if not _has_dev_support(dest_root):
+        return False
+
+    _ensure_builder_packages(dest_root)
+    _prune_runtime_root(dest_root)
+    _write_runtime_profile(dest_root)
+    _create_runtime_bundle(dest_root)
+    return _is_usable_full_runtime(dest_root)
 
 
 def _registry_candidates() -> list[str]:
@@ -303,19 +416,6 @@ def _candidate_python_paths() -> list[str]:
     return deduped
 
 
-def _copy_runtime(source_python: str, dest_root: str) -> None:
-    source_root = os.path.dirname(source_python)
-    if os.path.normcase(os.path.abspath(source_root)) == os.path.normcase(os.path.abspath(dest_root)):
-        return
-
-    shutil.rmtree(dest_root, ignore_errors=True)
-    shutil.copytree(
-        source_root,
-        dest_root,
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
-    )
-
-
 def main() -> int:
     if sys.version_info[:2] != (3, 12):
         current = os.path.normcase(os.path.abspath(sys.executable))
@@ -335,43 +435,55 @@ def main() -> int:
     args = parser.parse_args()
 
     dest_root = os.path.abspath(args.dest_root)
+    bundle_path = _runtime_bundle_path(dest_root)
+
     existing = _find_python_in_root(dest_root)
     if existing and _is_python312(existing):
         if _is_usable_full_runtime(dest_root):
-            print(f"Bundled full Python 3.12 already present: {existing}")
+            if not os.path.isfile(bundle_path):
+                _write_runtime_profile(dest_root)
+                _create_runtime_bundle(dest_root)
+            print(f"Bundled minimal Python 3.12 already present: {existing}")
+            return 0
+
+        if _prepare_existing_runtime_cache(dest_root):
+            print(f"Prepared bundled runtime cache from existing runtime folder: {dest_root}")
+            return 0
+
+        if os.path.isfile(bundle_path):
+            print(f"Runtime folder is incomplete; using cached bundled runtime package: {bundle_path}")
             return 0
 
         shutil.rmtree(dest_root, ignore_errors=True)
 
+    if os.path.isfile(bundle_path):
+        print(f"Using cached bundled runtime package: {bundle_path}")
+        return 0
+
     parent = os.path.dirname(dest_root)
     os.makedirs(parent, exist_ok=True)
 
-    for candidate in _candidate_python_paths():
-        if not _is_python312(candidate):
-            continue
-        if _is_embedded_root(os.path.dirname(candidate)):
-            continue
-        print(f"Staging bundled Python 3.12 from: {candidate}")
-        _copy_runtime(candidate, dest_root)
-        _ensure_builder_packages(dest_root)
-        _create_runtime_bundle(dest_root)
-        staged = _find_python_in_root(dest_root)
-        if staged and _is_usable_full_runtime(dest_root):
-            print(f"Bundled Python 3.12 staged to: {dest_root}")
-            return 0
+    profile_path = _runtime_profile_path(dest_root)
+    if os.path.isfile(bundle_path):
+        os.remove(bundle_path)
+    if os.path.isfile(profile_path):
+        os.remove(profile_path)
 
-    print("Installing bundled full Python 3.12 from official installer...")
-    _install_full_runtime(dest_root)
-    _ensure_builder_packages(dest_root)
+    if os.path.isdir(dest_root) and _prepare_existing_runtime_cache(dest_root):
+        print(f"Prepared bundled runtime cache from runtime folder: {dest_root}")
+        return 0
+
+    print("Runtime cache missing; generating a new bundled Python 3.12 package...")
+    _stage_clean_runtime_fallback(dest_root)
+    _write_runtime_profile(dest_root)
     _create_runtime_bundle(dest_root)
     staged = _find_python_in_root(dest_root)
     if staged and _is_usable_full_runtime(dest_root):
-        print(f"Bundled full Python 3.12 staged from official installer: {dest_root}")
+        print(f"Bundled minimal Python 3.12 staged from official installer: {dest_root}")
         return 0
 
     raise SystemExit(
-        "Unable to find a usable Python 3.12 installation to stage into packaging/runtime/python312. "
-        "Set INFERNUX_BUNDLED_PYTHON_ROOT or INFERNUX_BUNDLED_PYTHON_EXE if you want to override auto-detection."
+        "Unable to prepare a usable bundled Python 3.12 runtime under packaging/runtime/python312."
     )
 
 

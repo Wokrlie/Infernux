@@ -13,21 +13,14 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from hub_utils import get_bundle_dir, get_hub_data_dir, is_frozen
+from runtime_requirements import runtime_modules, runtime_packages
 
 
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 _RUNTIME_ROOT = Path.home() / ".infernux" / "runtime"
 _PUBLIC_RUNTIME_ROOT = Path("C:/Users/Public/InfernuxHub") if sys.platform == "win32" else _RUNTIME_ROOT
-_RUNTIME_PACKAGES = [
-    "pip",
-    "setuptools",
-    "wheel",
-    "nuitka",
-    "ordered-set",
-    "Pillow",
-    "imageio",
-    "av",
-]
+_RUNTIME_PACKAGES = runtime_packages()
+_REQUIRED_RUNTIME_MODULES = runtime_modules()
 
 
 def _runtime_lib_names() -> list[str]:
@@ -370,9 +363,9 @@ class PythonRuntimeManager:
                         "The installed managed Python 3.12 runtime is missing CPython build support files.\n"
                         "Please reinstall Infernux Hub so the runtime can be prepared during installation."
                     )
-                if not self._has_modules(python_exe, "pip", "nuitka", "PIL", "imageio", "av"):
+                if not self._has_modules(python_exe, *_REQUIRED_RUNTIME_MODULES):
                     raise PythonRuntimeError(
-                        "The installed managed Python 3.12 runtime is missing required support packages.\n"
+                        "The installed managed Python 3.12 runtime is missing required engine/build packages.\n"
                         "Please reinstall Infernux Hub so the runtime can be prepared during installation."
                     )
                 return python_exe
@@ -661,7 +654,7 @@ class PythonRuntimeManager:
             )
 
     def _ensure_runtime_packages(self, python_exe: str, *, on_status: Optional[Callable[[str], None]] = None) -> None:
-        if self._has_modules(python_exe, "pip", "nuitka", "PIL", "imageio", "av"):
+        if self._has_modules(python_exe, *_REQUIRED_RUNTIME_MODULES):
             return
 
         _emit_status(on_status, "Installing managed runtime support packages...")
@@ -685,7 +678,7 @@ class PythonRuntimeManager:
                 f"{(completed.stderr or completed.stdout or '').strip()}"
             )
 
-        if not self._has_modules(python_exe, "pip", "nuitka", "PIL", "imageio", "av"):
+        if not self._has_modules(python_exe, *_REQUIRED_RUNTIME_MODULES):
             raise PythonRuntimeError(
                 "Managed Python runtime is still missing required support packages after installation."
             )
