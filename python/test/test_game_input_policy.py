@@ -8,7 +8,6 @@ class TestShouldRouteGameInput:
         assert should_route_game_input(
             is_playing=False,
             panel_focused=False,
-            viewport_hovered=False,
             cursor_locked=True,
         ) is True
 
@@ -16,23 +15,20 @@ class TestShouldRouteGameInput:
         assert should_route_game_input(
             is_playing=True,
             panel_focused=True,
-            viewport_hovered=False,
             cursor_locked=False,
         ) is True
 
-    def test_routes_input_when_playing_and_viewport_hovered(self):
+    def test_blocks_input_when_only_viewport_is_hovered(self):
         assert should_route_game_input(
             is_playing=True,
             panel_focused=False,
-            viewport_hovered=True,
             cursor_locked=False,
-        ) is True
+        ) is False
 
     def test_blocks_input_when_not_playing_and_not_locked(self):
         assert should_route_game_input(
             is_playing=False,
             panel_focused=True,
-            viewport_hovered=True,
             cursor_locked=False,
         ) is False
 

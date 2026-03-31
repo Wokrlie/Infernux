@@ -219,10 +219,6 @@ class GameViewPanel(EditorPanel):
         scale = min(region_w / float(src_w), region_h / float(src_h))
         return float(src_w) * scale, float(src_h) * scale
 
-    @staticmethod
-    def _has_game_input_focus(is_playing: bool, panel_active: bool, cursor_locked: bool) -> bool:
-        return is_playing and (panel_active or cursor_locked)
-    
     # ------------------------------------------------------------------
     # EditorPanel hooks
     # ------------------------------------------------------------------
@@ -432,7 +428,6 @@ class GameViewPanel(EditorPanel):
             should_route_game_input(
                 is_playing=is_playing,
                 panel_focused=panel_focused,
-                viewport_hovered=viewport_hovered,
                 cursor_locked=cursor_locked,
             )
         )

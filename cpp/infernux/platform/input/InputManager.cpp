@@ -162,6 +162,12 @@ void InputManager::BeginFrame()
     m_inputString.clear();
     m_touchCount = 0;
     m_droppedFiles.clear();
+
+    // Scene-view drag capture must not survive focus loss. Gameplay cursor
+    // lock state is preserved so it can be restored automatically after the
+    // window regains focus.
+    m_editorMouseCaptured = false;
+    ApplyRelativeMouseMode();
 }
 
 void InputManager::ProcessSDLEvent(const SDL_Event &event)
@@ -405,9 +411,6 @@ const char *InputManager::ScancodeToName(int scancode)
 
 void InputManager::SetWindow(SDL_Window *window)
 {
-    if (m_window == window)
-        return;
-
     m_window = window;
     ApplyRelativeMouseMode();
 }
@@ -441,7 +444,20 @@ void InputManager::ApplyRelativeMouseMode()
         return;
     }
 
-    SDL_SetWindowRelativeMouseMode(m_window, relativeMouseEnabled);
+    if (!relativeMouseEnabled) {
+        SDL_SetWindowRelativeMouseMode(m_window, false);
+        return;
+    }
+
+    // Never keep SDL in relative mouse mode while the editor window is not the
+    // active input target, otherwise alt-tab can leave the OS cursor captured.
+    const Uint64 windowFlags = SDL_GetWindowFlags(m_window);
+    if ((windowFlags & SDL_WINDOW_INPUT_FOCUS) == 0) {
+        SDL_SetWindowRelativeMouseMode(m_window, false);
+        return;
+    }
+
+    SDL_SetWindowRelativeMouseMode(m_window, true);
 }
 
 } // namespace infernux
