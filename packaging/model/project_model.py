@@ -61,6 +61,12 @@ def _summarize_output(output: str) -> str:
     return "\n".join(lines[-20:])
 
 
+_NATIVE_IMPORT_SMOKE_TEST = (
+    "import Infernux.lib\n"
+    "print('INFERNUX_NATIVE_IMPORT_OK')\n"
+)
+
+
 def _find_dev_wheel() -> str:
     """Find the Infernux wheel in the dist/ directory next to the engine source.
 
@@ -227,6 +233,21 @@ class ProjectModel:
             [project_python, "-m", "pip", "install", "--force-reinstall", *_PIP_FLAGS, wheel],
             timeout=600,
         )
+        ProjectModel.validate_python_runtime(project_python)
+
+    @staticmethod
+    def validate_python_runtime(project_python: str) -> None:
+        if not os.path.isfile(project_python):
+            raise RuntimeError(
+                f"Project Python not found at {project_python}.\n"
+                "The project runtime may not have been created correctly."
+            )
+
+        _run_hidden([project_python, "-c", _NATIVE_IMPORT_SMOKE_TEST], timeout=120)
+
+    @staticmethod
+    def validate_project_runtime(project_dir: str) -> None:
+        ProjectModel.validate_python_runtime(ProjectModel._get_project_python(project_dir))
 
     @staticmethod
     def _create_vscode_workspace(project_dir: str):

@@ -1,3 +1,5 @@
+import ctypes
+import glob
 import os
 import sys
 from functools import wraps
@@ -47,14 +49,60 @@ def _iter_dev_native_search_dirs():
         for config in configs:
             yield os.path.join(build_root, *prefix, config)
 
+
+def _collect_windows_native_load_hints():
+    if sys.platform != "win32":
+        return []
+
+    hints = []
+    checks = (
+        ("MSVCP140.dll", "Install or repair the Microsoft Visual C++ Redistributable."),
+        ("VCRUNTIME140.dll", "Install or repair the Microsoft Visual C++ Redistributable."),
+        ("VCRUNTIME140_1.dll", "Install or repair the Microsoft Visual C++ Redistributable."),
+        ("vulkan-1.dll", "Install a current GPU driver or the Vulkan Runtime."),
+    )
+
+    for dll_name, remedy in checks:
+        try:
+            ctypes.WinDLL(dll_name)
+        except OSError:
+            hints.append(f"Missing {dll_name}. {remedy}")
+
+    if not glob.glob(os.path.join(lib_dir, "_Infernux*.pyd")):
+        hints.append(f"Missing _Infernux*.pyd under {lib_dir}. Reinstall the Infernux wheel.")
+
+    return hints
+
+
+def _raise_native_import_error(exc):
+    lines = [
+        "Failed to load the Infernux native module.",
+        f"Library directory: {lib_dir}",
+        f"Original error: {exc}",
+    ]
+
+    hints = _collect_windows_native_load_hints()
+    if hints:
+        lines.append("Likely causes:")
+        lines.extend(f"- {hint}" for hint in hints)
+    elif sys.platform == "win32":
+        lines.append(
+            "Likely causes: a missing Vulkan runtime or missing Microsoft Visual C++ runtime DLLs."
+        )
+
+    raise ImportError("\n".join(lines)) from exc
+
 _register_native_search_dir(lib_dir)
 
 try:
     from ._Infernux import *
-except ModuleNotFoundError:
+except (ModuleNotFoundError, ImportError):
     for candidate in _iter_dev_native_search_dirs():
         _register_native_search_dir(candidate)
-    from ._Infernux import *
+    try:
+        from ._Infernux import *
+    except (ModuleNotFoundError, ImportError) as exc:
+        _raise_native_import_error(exc)
 
 
 _INVALID_NATIVE_LIFETIME_MARKERS = (

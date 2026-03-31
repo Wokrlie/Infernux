@@ -3,6 +3,7 @@
 # ============================================================================
 /build/
 /out/
+/dev/
 /packaging/runtime/
 /packaging/_vendor/
 cmake-build-*/

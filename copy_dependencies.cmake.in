@@ -2,6 +2,7 @@
 set(TARGET_DIR "@PYTHON_TARGET_DIR@")
 set(BUILD_DIR "@CMAKE_BINARY_DIR@")
 set(SOURCE_DIR "@CMAKE_SOURCE_DIR@")
+set(MSVC_RUNTIME_DLLS "@CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS@")
 
 # Function to copy file if it exists
 function(copy_if_exists src dest)
@@ -54,6 +55,11 @@ foreach(dll_file ${all_dlls})
     if(dll_dir MATCHES ".*/${_CFG}$" OR dll_dir MATCHES ".*/${_CFG}/.*")
         copy_if_exists("${dll_file}" "${TARGET_DIR}")
     endif()
+endforeach()
+
+# Copy the MSVC runtime DLLs discovered by CMake so wheel installs work on clean machines.
+foreach(runtime_dll ${MSVC_RUNTIME_DLLS})
+    copy_if_exists("${runtime_dll}" "${TARGET_DIR}")
 endforeach()
 
 message(STATUS "Finished copying DLL dependencies to ${TARGET_DIR}")

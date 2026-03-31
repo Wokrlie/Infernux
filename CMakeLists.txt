@@ -51,6 +51,10 @@ endif()
 find_package(pybind11 CONFIG REQUIRED)
 find_package(Vulkan REQUIRED)
 
+if(WIN32)
+    include(InstallRequiredSystemLibraries)
+endif()
+
 pybind11_add_module(_Infernux MODULE
     ${ENGINE_SOURCES}
     ${BINDING_SOURCES}

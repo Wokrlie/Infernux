@@ -104,6 +104,16 @@ class ControlPaneViewModel:
                     "Please recreate the project or reinstall the engine version.",
                 )
                 return
+            try:
+                ProjectModel.validate_python_runtime(python_exe)
+            except RuntimeError as exc:
+                QMessageBox.critical(
+                    parent,
+                    "Native Runtime Check Failed",
+                    "The project runtime exists, but the Infernux native module could not be loaded.\n\n"
+                    f"{exc}",
+                )
+                return
         else:
             # Dev mode → use current Python (conda / system)
             python_exe = sys.executable
