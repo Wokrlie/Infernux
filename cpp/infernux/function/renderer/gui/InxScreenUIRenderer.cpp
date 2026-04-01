@@ -557,10 +557,13 @@ void InxScreenUIRenderer::Destroy()
     }
 
     if (m_device != VK_NULL_HANDLE) {
-        if (m_vertexBuffer)
-            vmaDestroyBuffer(m_allocator, m_vertexBuffer, m_vertexAlloc);
-        if (m_indexBuffer)
-            vmaDestroyBuffer(m_allocator, m_indexBuffer, m_indexAlloc);
+        for (auto &buf : m_listBuffers) {
+            if (buf.vertexBuffer)
+                vmaDestroyBuffer(m_allocator, buf.vertexBuffer, buf.vertexAlloc);
+            if (buf.indexBuffer)
+                vmaDestroyBuffer(m_allocator, buf.indexBuffer, buf.indexAlloc);
+            buf = {};
+        }
         if (m_pipeline)
             vkDestroyPipeline(m_device, m_pipeline, nullptr);
         if (m_pipelineLayout)
@@ -575,8 +578,8 @@ void InxScreenUIRenderer::Destroy()
             vkDestroyShaderModule(m_device, m_fragShader, nullptr);
     }
 
-    m_vertexBuffer = VK_NULL_HANDLE;
-    m_indexBuffer = VK_NULL_HANDLE;
+    m_listBuffers[0] = {};
+    m_listBuffers[1] = {};
     m_pipeline = VK_NULL_HANDLE;
     m_pipelineLayout = VK_NULL_HANDLE;
     m_descriptorSetLayout = VK_NULL_HANDLE;
@@ -751,12 +754,14 @@ void InxScreenUIRenderer::Render(VkCommandBuffer cmdBuf, ScreenUIList list, uint
 
     const VkDeviceSize vtxSize = gpuVertices.size() * sizeof(GPUVertex);
     const VkDeviceSize idxSize = static_cast<VkDeviceSize>(dl->IdxBuffer.Size) * sizeof(ImDrawIdx);
-    if (!EnsureBuffers(vtxSize, idxSize)) {
+    const int bufIdx = (list == ScreenUIList::Camera) ? 0 : 1;
+    ListBuffers &buf = m_listBuffers[bufIdx];
+    if (!EnsureBuffers(buf, vtxSize, idxSize)) {
         INXLOG_ERROR("InxScreenUIRenderer: Failed to resize screen UI upload buffers");
         return;
     }
-    if (!UploadAllocation(m_allocator, m_vertexAlloc, gpuVertices.data(), static_cast<size_t>(vtxSize)) ||
-        !UploadAllocation(m_allocator, m_indexAlloc, dl->IdxBuffer.Data, static_cast<size_t>(idxSize))) {
+    if (!UploadAllocation(m_allocator, buf.vertexAlloc, gpuVertices.data(), static_cast<size_t>(vtxSize)) ||
+        !UploadAllocation(m_allocator, buf.indexAlloc, dl->IdxBuffer.Data, static_cast<size_t>(idxSize))) {
         INXLOG_ERROR("InxScreenUIRenderer: Failed to upload screen UI draw data");
         return;
     }
@@ -765,10 +770,10 @@ void InxScreenUIRenderer::Render(VkCommandBuffer cmdBuf, ScreenUIList list, uint
     vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
 
     // ---- Bind vertex/index buffers ----
-    const VkBuffer vertexBuffer = m_vertexBuffer;
+    const VkBuffer vertexBuffer = buf.vertexBuffer;
     const VkDeviceSize vertexBufferOffset = 0;
     vkCmdBindVertexBuffers(cmdBuf, 0, 1, &vertexBuffer, &vertexBufferOffset);
-    vkCmdBindIndexBuffer(cmdBuf, m_indexBuffer, 0,
+    vkCmdBindIndexBuffer(cmdBuf, buf.indexBuffer, 0,
                          sizeof(ImDrawIdx) == 2 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
 
     const VkViewport viewport = MakeViewport(width, height);
@@ -922,12 +927,12 @@ bool InxScreenUIRenderer::CreatePipeline()
 // Buffer Management
 // ============================================================================
 
-bool InxScreenUIRenderer::EnsureBuffers(VkDeviceSize vertexSize, VkDeviceSize indexSize)
+bool InxScreenUIRenderer::EnsureBuffers(ListBuffers &buf, VkDeviceSize vertexSize, VkDeviceSize indexSize)
 {
-    return EnsureHostVisibleBuffer(m_allocator, m_deletionQueue, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_vertexBuffer,
-                                   m_vertexAlloc, m_vertexBufferSize, vertexSize) &&
-           EnsureHostVisibleBuffer(m_allocator, m_deletionQueue, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, m_indexBuffer,
-                                   m_indexAlloc, m_indexBufferSize, indexSize);
+    return EnsureHostVisibleBuffer(m_allocator, m_deletionQueue, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, buf.vertexBuffer,
+                                   buf.vertexAlloc, buf.vertexBufferSize, vertexSize) &&
+           EnsureHostVisibleBuffer(m_allocator, m_deletionQueue, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, buf.indexBuffer,
+                                   buf.indexAlloc, buf.indexBufferSize, indexSize);
 }
 
 // ============================================================================

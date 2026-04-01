@@ -1,6 +1,6 @@
 """Infernux UI module — screen-space UI components."""
 
-from .enums import RenderMode, ScreenAlignH, ScreenAlignV, TextAlignH, TextAlignV, TextOverflow, TextResizeMode, UITransitionType
+from .enums import RenderMode, ScreenAlignH, ScreenAlignV, TextAlignH, TextAlignV, TextOverflow, TextResizeMode, UITransitionType, UIScaleMode, ScreenMatchMode
 from .inx_ui_component import InxUIComponent
 from .inx_ui_screen_component import InxUIScreenComponent
 from .ui_canvas import UICanvas
@@ -23,6 +23,8 @@ __all__ = [
     "TextOverflow",
     "TextResizeMode",
     "UITransitionType",
+    "UIScaleMode",
+    "ScreenMatchMode",
     "InxUIComponent",
     "InxUIScreenComponent",
     "UICanvas",

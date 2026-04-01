@@ -51,6 +51,20 @@ class TextResizeMode(IntEnum):
     FixedSize = 2
 
 
+class UIScaleMode(IntEnum):
+    """How a UICanvas scales UI elements (mirrors Unity CanvasScaler)."""
+    ConstantPixelSize = 0       # UI elements keep their pixel size
+    ScaleWithScreenSize = 1     # Scale based on a reference resolution
+    ConstantPhysicalSize = 2    # UI keeps physical size (future)
+
+
+class ScreenMatchMode(IntEnum):
+    """How to blend width/height when using ScaleWithScreenSize."""
+    MatchWidthOrHeight = 0      # Blend between matching width or height
+    Expand = 1                  # Canvas grows so nothing is cropped
+    Shrink = 2                  # Canvas shrinks so everything fits
+
+
 class UITransitionType(IntEnum):
     """Visual transition type for interactive elements (UISelectable)."""
     ColorTint = 0      # Tint the target graphic's color

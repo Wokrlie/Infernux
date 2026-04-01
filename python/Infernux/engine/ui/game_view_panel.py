@@ -498,6 +498,13 @@ class GameViewPanel(EditorPanel):
         _get_tid = _get_tex_cache().get_bound(self._engine)
 
         for canvas in canvases:
+            # Skip inactive canvas GameObjects
+            canvas_go = canvas.game_object
+            if canvas_go is not None and not canvas_go.active_in_hierarchy:
+                continue
+            if not getattr(canvas, 'enabled', True):
+                continue
+
             # Map RenderMode to ScreenUIList
             if canvas.render_mode == RenderMode.CameraOverlay:
                 ui_list = ScreenUIList.Camera
@@ -510,12 +517,20 @@ class GameViewPanel(EditorPanel):
             ref_h = float(canvas.reference_height)
             if ref_w < 1 or ref_h < 1:
                 continue
-            # Scale from design resolution to actual game resolution
-            scale_x = float(game_w) / ref_w
-            scale_y = float(game_h) / ref_h
-            text_scale = min(scale_x, scale_y)
+            # Use Unity-aligned CanvasScaler logic
+            scale_x, scale_y, text_scale = canvas.compute_scale(float(game_w), float(game_h))
+            # Center canvas in viewport when uniform scale doesn't fill screen
+            offset_x = (float(game_w) - ref_w * scale_x) * 0.5
+            offset_y = (float(game_h) - ref_h * scale_y) * 0.5
 
             for elem in canvas._get_elements():
+                # Skip inactive / disabled elements
+                elem_go = elem.game_object
+                if elem_go is not None and not elem_go.active_in_hierarchy:
+                    continue
+                if not getattr(elem, 'enabled', True):
+                    continue
+
                 ex, ey, ew, eh = elem.get_rect(ref_w, ref_h)
 
                 if use_overlay:
@@ -536,8 +551,8 @@ class GameViewPanel(EditorPanel):
                         get_tex_id=_get_tid,
                     )
                 else:
-                    sx = ex * scale_x
-                    sy = ey * scale_y
+                    sx = offset_x + ex * scale_x
+                    sy = offset_y + ey * scale_y
                     sw = ew * scale_x
                     sh = eh * scale_y
                     _ui_dispatch(
@@ -584,8 +599,11 @@ class GameViewPanel(EditorPanel):
             if ref_w < 1 or ref_h < 1:
                 canvas_positions.append((0.0, 0.0))
                 continue
-            cx = game_px * ref_w / float(game_w)
-            cy = game_py * ref_h / float(game_h)
+            scale_x, scale_y, _ = canvas.compute_scale(float(game_w), float(game_h))
+            offset_x = (float(game_w) - ref_w * scale_x) * 0.5
+            offset_y = (float(game_h) - ref_h * scale_y) * 0.5
+            cx = (game_px - offset_x) / max(scale_x, 1e-6)
+            cy = (game_py - offset_y) / max(scale_y, 1e-6)
             canvas_positions.append((cx, cy))
 
         scroll = (scroll_x, scroll_y)

@@ -336,15 +336,22 @@ class InxUIScreenComponent(InxUIComponent):
     # ------------------------------------------------------------------
 
     def contains_point(self, px: float, py: float,
-                       canvas_width: float, canvas_height: float) -> bool:
+                       canvas_width: float, canvas_height: float,
+                       tolerance: float = 0.0) -> bool:
         """Test whether canvas-space point (px, py) lies inside this element.
 
         Uses the oriented (rotated) bounding box for accurate hit-testing.
+        *tolerance* expands the hit area by that many canvas-space pixels on each side.
         """
         if not self.raycast_target:
             return False
 
         rx, ry, rw, rh = self.get_rect(canvas_width, canvas_height)
+        if tolerance > 0.0:
+            rx -= tolerance
+            ry -= tolerance
+            rw += tolerance * 2.0
+            rh += tolerance * 2.0
         rot = float(self.rotation) % 360.0
 
         if abs(rot) < 0.001:

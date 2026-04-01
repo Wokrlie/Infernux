@@ -299,11 +299,10 @@ def _runtime_render_image(elem, renderer, ui_list, sx, sy, sw, sh,
             rounding,
         )
     else:
-        tint = Theme.UI_EDITOR_PLACEHOLDER_TINT
         renderer.add_filled_rect(
             ui_list,
             sx, sy, sx + sw, sy + sh,
-            cr * tint, cg * tint, cb * tint, ca * Theme.UI_EDITOR_PLACEHOLDER_ALPHA,
+            cr, cg, cb, ca,
             rounding,
         )
 

@@ -374,8 +374,9 @@ class HierarchyPanel(EditorPanel):
         is_prefab = getattr(obj, 'is_prefab_instance', False)
         display_name = f"{Theme.PREFAB_ICON} {obj.name}" if is_prefab else obj.name
 
-        # In UI mode, dim objects not belonging to a canvas tree
-        ui_dimmed = self._ui_mode and not self._is_in_canvas_tree(obj)
+        # Dim objects that don't belong to the current mode's domain
+        in_canvas = self._is_in_canvas_tree(obj)
+        ui_dimmed = (self._ui_mode and not in_canvas) or (not self._ui_mode and in_canvas)
         text_color_pushed = 0
         if ui_dimmed:
             ctx.push_style_color(ImGuiCol.Text, *Theme.TEXT_DISABLED)
@@ -463,10 +464,17 @@ class HierarchyPanel(EditorPanel):
                 self._delete_object(obj)
             ctx.end_popup()
 
-        # Drag source - start dragging this object
-        if ctx.begin_drag_drop_source(0):
+        # Drag source - start dragging this object (or all selected objects)
+        # Each mode only allows dragging its own domain's objects
+        in_canvas = self._is_in_canvas_tree(obj)
+        can_drag = (self._ui_mode and in_canvas) or (not self._ui_mode and not in_canvas)
+        if can_drag and ctx.begin_drag_drop_source(0):
             ctx.set_drag_drop_payload(self.DRAG_DROP_TYPE, obj_id)
-            ctx.label(f"{obj.name}")
+            n = self._sel.count() if self._sel.is_selected(obj_id) else 1
+            if n > 1:
+                ctx.label(f"{obj.name} (+{n - 1})")
+            else:
+                ctx.label(f"{obj.name}")
             ctx.end_drag_drop_source()
 
         # ── Drop target on the tree node body → reparent as child ──
@@ -491,96 +499,185 @@ class HierarchyPanel(EditorPanel):
                                lambda payload, _oid=obj_id: self._move_object_adjacent(payload, _oid, after=True))
 
         ctx.pop_id()
+
+    # ------------------------------------------------------------------
+    # Multi-select drag helpers
+    # ------------------------------------------------------------------
+
+    def _get_drag_ids(self, primary_id: int) -> list[int]:
+        """Return the list of IDs to move during a drag-drop operation.
+
+        If *primary_id* is part of the current selection, return all
+        selected IDs (preserving selection order).  Otherwise return
+        just ``[primary_id]``.
+        """
+        if self._sel.is_selected(primary_id) and self._sel.count() > 1:
+            return self._sel.get_ids()
+        return [primary_id]
+
+    @staticmethod
+    def _topo_sort_ids(scene, ids: list[int]) -> list[int]:
+        """Sort *ids* by depth-first hierarchy order (parents before children)."""
+        id_set = set(ids)
+        ordered = []
+
+        def _walk(go):
+            gid = go.id
+            if gid in id_set:
+                ordered.append(gid)
+                id_set.discard(gid)
+            for child in go.get_children():
+                _walk(child)
+
+        for root_obj in scene.get_root_objects():
+            _walk(root_obj)
+            if not id_set:
+                break
+        for gid in ids:
+            if gid not in ordered:
+                ordered.append(gid)
+        return ordered
     
     def _reparent_object(self, dragged_id: int, new_parent_id: int) -> None:
-        """Reparent a GameObject to a new parent."""
+        """Reparent one or more GameObjects to a new parent (multi-select aware)."""
         from Infernux.lib import SceneManager
         scene = SceneManager.instance().get_active_scene()
         if not scene:
             return
-
-        dragged_obj = scene.find_by_id(dragged_id)
         new_parent = scene.find_by_id(new_parent_id)
+        if not new_parent:
+            return
 
-        if dragged_obj and new_parent and dragged_id != new_parent_id:
-            # Prevent parenting to own child
-            if not self._is_descendant_of(new_parent, dragged_obj):
-                # UI Mode validation: Canvas must stay root
-                if self._ui_mode:
-                    if self._go_has_canvas(dragged_obj):
-                        self._show_ui_mode_warning(
-                            "Canvas 只能作为根物体，不能放入其他物体下。\n"
-                            "Canvas can only be a root object.")
-                        return
-                # Always block: UI screen components must stay under a Canvas
-                if self._go_has_ui_screen_component(dragged_obj):
-                    if not self._parent_has_canvas_ancestor(new_parent):
-                        self._show_ui_mode_warning(
-                            "UI 组件只能放在 Canvas 下。\n"
-                            "UI components must be placed under a Canvas.")
-                        return
-                old_parent = dragged_obj.get_parent()
-                old_parent_id = old_parent.id if old_parent else None
-                old_index = dragged_obj.transform.get_sibling_index() if getattr(dragged_obj, "transform", None) else 0
-                new_index = len(new_parent.get_children())
-                if old_parent_id == new_parent_id and old_index < new_index:
-                    new_index -= 1
-                self._execute_hierarchy_move(dragged_id, old_parent_id, new_parent_id, old_index, new_index)
-                self._pending_expand_id = new_parent_id
+        drag_ids = self._get_drag_ids(dragged_id)
+        sorted_ids = self._topo_sort_ids(scene, drag_ids)
+
+        for did in sorted_ids:
+            if did == new_parent_id:
+                continue
+            obj = scene.find_by_id(did)
+            if obj is None:
+                continue
+            if self._is_descendant_of(new_parent, obj):
+                continue
+            if not self._validate_reparent(obj, new_parent_id, new_parent):
+                continue
+            old_p = obj.get_parent()
+            old_pid = old_p.id if old_p else None
+            old_idx = obj.transform.get_sibling_index() if getattr(obj, "transform", None) else 0
+            new_idx = len(new_parent.get_children())
+            if old_pid == new_parent_id and old_idx < new_idx:
+                new_idx -= 1
+            self._execute_hierarchy_move(did, old_pid, new_parent_id, old_idx, new_idx)
+        self._pending_expand_id = new_parent_id
+
+    def _validate_reparent(self, obj, new_parent_id, new_parent) -> bool:
+        """Return True if *obj* may be reparented under *new_parent*."""
+        if self._ui_mode:
+            # In UI mode, only canvas-tree objects may move
+            if not self._is_in_canvas_tree(obj):
+                return False
+            if self._go_has_canvas(obj):
+                self._show_ui_mode_warning(
+                    "Canvas 只能作为根物体，不能放入其他物体下。\n"
+                    "Canvas can only be a root object.")
+                return False
+        else:
+            # In normal mode, canvas-tree objects are locked
+            if self._is_in_canvas_tree(obj):
+                return False
+        # UI screen components must stay under a Canvas
+        if self._go_has_ui_screen_component(obj):
+            if new_parent is None or not self._parent_has_canvas_ancestor(new_parent):
+                self._show_ui_mode_warning(
+                    "UI 组件只能放在 Canvas 下。\n"
+                    "UI components must be placed under a Canvas.")
+                return False
+        return True
 
     def _move_object_adjacent(self, dragged_id: int, target_id: int, *, after: bool) -> None:
-        """Move a GameObject before/after another sibling target."""
+        """Move one or more GameObjects before/after a sibling target (multi-select aware)."""
         from Infernux.lib import SceneManager
         scene = SceneManager.instance().get_active_scene()
-        if not scene or dragged_id == target_id:
+        if not scene:
             return
-
-        dragged_obj = scene.find_by_id(dragged_id)
         target_obj = scene.find_by_id(target_id)
-        if dragged_obj is None or target_obj is None:
-            return
-        if self._is_descendant_of(target_obj, dragged_obj):
+        if target_obj is None:
             return
 
         new_parent = target_obj.get_parent()
         new_parent_id = new_parent.id if new_parent else None
 
-        # UI Mode validation
+        drag_ids = self._get_drag_ids(dragged_id)
+        sorted_ids = self._topo_sort_ids(scene, drag_ids)
+
+        # Filter out invalid targets and the target itself
+        valid_ids = []
+        for did in sorted_ids:
+            if did == target_id:
+                continue
+            obj = scene.find_by_id(did)
+            if obj is None:
+                continue
+            if self._is_descendant_of(target_obj, obj):
+                continue
+            if not self._validate_move_adjacent(obj, new_parent_id, new_parent):
+                continue
+            valid_ids.append(did)
+
+        if not valid_ids:
+            return
+
+        # Move the first item to the anchor position; subsequent items follow
+        anchor_index = target_obj.transform.get_sibling_index() if getattr(target_obj, "transform", None) else 0
+        insert_idx = anchor_index + (1 if after else 0)
+
+        for did in valid_ids:
+            obj = scene.find_by_id(did)
+            if obj is None:
+                continue
+            old_p = obj.get_parent()
+            old_pid = old_p.id if old_p else None
+            old_idx = obj.transform.get_sibling_index() if getattr(obj, "transform", None) else 0
+
+            effective_idx = insert_idx
+            if old_pid == new_parent_id and old_idx < effective_idx:
+                effective_idx -= 1
+            if old_pid == new_parent_id and old_idx == effective_idx:
+                insert_idx += 1
+                continue
+
+            self._execute_hierarchy_move(did, old_pid, new_parent_id, old_idx, effective_idx)
+            insert_idx = effective_idx + 1
+
+        if new_parent_id is not None:
+            self._pending_expand_id = new_parent_id
+
+    def _validate_move_adjacent(self, obj, new_parent_id, new_parent) -> bool:
+        """Return True if *obj* may be moved next to a sibling under *new_parent*."""
         if self._ui_mode:
-            if self._go_has_canvas(dragged_obj) and new_parent_id is not None:
+            if not self._is_in_canvas_tree(obj):
+                return False
+            if self._go_has_canvas(obj) and new_parent_id is not None:
                 self._show_ui_mode_warning(
                     "Canvas 只能作为根物体，不能放入其他物体下。\n"
                     "Canvas can only be a root object.")
-                return
-            if not self._go_has_canvas(dragged_obj) and new_parent_id is None:
+                return False
+            if not self._go_has_canvas(obj) and new_parent_id is None:
                 self._show_ui_mode_warning(
                     "UI 元素不能成为根物体，必须放在 Canvas 下。\n"
                     "UI elements must be placed under a Canvas.")
-                return
-
-        # Always block: UI screen components must stay under a Canvas
-        if self._go_has_ui_screen_component(dragged_obj):
-            if new_parent_id is None or not self._parent_has_canvas_ancestor(new_parent):
+                return False
+        else:
+            if self._is_in_canvas_tree(obj):
+                return False
+        # UI screen components must stay under a Canvas
+        if self._go_has_ui_screen_component(obj):
+            if new_parent_id is None or (new_parent is not None and not self._parent_has_canvas_ancestor(new_parent)):
                 self._show_ui_mode_warning(
                     "UI 组件只能放在 Canvas 下。\n"
                     "UI components must be placed under a Canvas.")
-                return
-
-        old_parent = dragged_obj.get_parent()
-        old_parent_id = old_parent.id if old_parent else None
-        old_index = dragged_obj.transform.get_sibling_index() if getattr(dragged_obj, "transform", None) else 0
-        target_index = target_obj.transform.get_sibling_index() if getattr(target_obj, "transform", None) else 0
-        new_index = target_index + (1 if after else 0)
-
-        if old_parent_id == new_parent_id and old_index < new_index:
-            new_index -= 1
-
-        if old_parent_id == new_parent_id and old_index == new_index:
-            return
-
-        self._execute_hierarchy_move(dragged_id, old_parent_id, new_parent_id, old_index, new_index)
-        if new_parent_id is not None:
-            self._pending_expand_id = new_parent_id
+                return False
+        return True
     
     def _is_descendant_of(self, potential_child, potential_parent) -> bool:
         """Check if potential_child is a descendant of potential_parent."""
@@ -997,10 +1094,9 @@ class HierarchyPanel(EditorPanel):
             )
             root_objects = self._get_root_objects_cached(scene, allow_stale=allow_stale_roots)
 
-            # In UI Mode, compute canvas root set for dim/allow logic
-            if self._ui_mode:
-                canvas_roots = self._get_canvas_roots_cached(root_objects)
-                self._ui_mode_canvas_root_ids = {go.id for go in canvas_roots}
+            # Always compute canvas root set for dim/allow logic
+            canvas_roots = self._get_canvas_roots_cached(root_objects)
+            self._ui_mode_canvas_root_ids = {go.id for go in canvas_roots}
 
             visible_root_objects = self._filter_objects_for_search(root_objects)
             n_roots = len(visible_root_objects) if visible_root_objects else 0
@@ -1141,33 +1237,44 @@ class HierarchyPanel(EditorPanel):
             ctx.end_popup()
 
     def _reparent_to_root(self, dragged_id: int) -> None:
-        """Reparent a GameObject to root (no parent)."""
+        """Reparent one or more GameObjects to root (multi-select aware)."""
         from Infernux.lib import SceneManager
         scene = SceneManager.instance().get_active_scene()
         if not scene:
             return
 
-        dragged_obj = scene.find_by_id(dragged_id)
-        if dragged_obj:
-            # UI Mode validation: only Canvas can be root
-            if self._ui_mode and not self._go_has_canvas(dragged_obj):
-                self._show_ui_mode_warning(
-                    "UI 元素不能成为根物体，必须放在 Canvas 下。\n"
-                    "UI elements must be placed under a Canvas.")
-                return
+        drag_ids = self._get_drag_ids(dragged_id)
+        sorted_ids = self._topo_sort_ids(scene, drag_ids)
+
+        for did in sorted_ids:
+            obj = scene.find_by_id(did)
+            if obj is None:
+                continue
+            # UI Mode: only Canvas can be root; non-canvas-tree objects are locked
+            if self._ui_mode:
+                if not self._is_in_canvas_tree(obj):
+                    continue
+                if not self._go_has_canvas(obj):
+                    self._show_ui_mode_warning(
+                        "UI 元素不能成为根物体，必须放在 Canvas 下。\n"
+                        "UI elements must be placed under a Canvas.")
+                    continue
+            else:
+                if self._is_in_canvas_tree(obj):
+                    continue
             # Always block: UI screen components cannot be root
-            if self._go_has_ui_screen_component(dragged_obj):
+            if self._go_has_ui_screen_component(obj):
                 self._show_ui_mode_warning(
                     "UI 组件只能放在 Canvas 下。\n"
                     "UI components must be placed under a Canvas.")
-                return
-            old_parent = dragged_obj.get_parent()
+                continue
+            old_parent = obj.get_parent()
             old_parent_id = old_parent.id if old_parent else None
-            old_index = dragged_obj.transform.get_sibling_index() if getattr(dragged_obj, "transform", None) else 0
+            old_index = obj.transform.get_sibling_index() if getattr(obj, "transform", None) else 0
             root_count = len(scene.get_root_objects())
             new_index = max(0, root_count - (1 if old_parent_id is None else 0))
             if old_parent_id is not None or old_index != new_index:
-                self._execute_hierarchy_move(dragged_id, old_parent_id, None, old_index, new_index)
+                self._execute_hierarchy_move(did, old_parent_id, None, old_index, new_index)
     
     def _show_create_primitive_menu(self, ctx: InxGUIContext, parent_id: int = None) -> None:
         """Show the Create 3D Object submenu."""

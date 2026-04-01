@@ -591,24 +591,15 @@ class EditorBootstrap:
         ui_editor.set_on_selection_changed(on_ui_editor_selected)
 
         def on_hierarchy_ui_sync(obj):
-            if hierarchy.ui_mode:
-                ui_editor.notify_hierarchy_selection(obj)
+            ui_editor.notify_hierarchy_selection(obj)
 
         hierarchy.set_on_selection_changed_ui_editor(on_hierarchy_ui_sync)
 
         def on_panel_focus_changed(_old_panel_id: str, new_panel_id: str):
-            hierarchy.set_ui_mode(new_panel_id == ui_editor.window_id)
             if self.window_manager is not None:
                 self.window_manager.note_panel_focus(new_panel_id)
 
         ClosablePanel.set_on_panel_focus_changed(on_panel_focus_changed)
-
-        def exit_ui_mode():
-            if hierarchy.ui_mode:
-                hierarchy.set_ui_mode(False)
-
-        scene_view._on_focus_gained = exit_ui_mode
-        game_view._on_focus_gained = exit_ui_mode
 
     # ── Phase 9: Scene-change cleanup ──────────────────────────────────
 

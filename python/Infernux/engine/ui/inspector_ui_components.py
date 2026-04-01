@@ -628,7 +628,11 @@ def _render_text_fill(ctx, text_comp: UIText):
 
 
 def _render_canvas_inspector(ctx, canvas: UICanvas):
-    lw = max_label_w(ctx, [t("ui_comp.render_mode"), t("ui_comp.sort_order"), t("ui_comp.target_camera"), t("ui_comp.reference_size")])
+    from Infernux.ui.enums import UIScaleMode, ScreenMatchMode
+
+    lw = max_label_w(ctx, [t("ui_comp.render_mode"), t("ui_comp.sort_order"), t("ui_comp.target_camera"), t("ui_comp.reference_size"),
+                           t("ui_comp.ui_scale_mode"), t("ui_comp.screen_match_mode"), t("ui_comp.match"),
+                           t("ui_comp.pixel_perfect"), t("ui_comp.ref_pixels_per_unit")])
     if render_compact_section_header(ctx, t("ui_comp.canvas"), level="secondary"):
         members = list(RenderMode)
         labels = [member.name for member in members]
@@ -653,6 +657,45 @@ def _render_canvas_inspector(ctx, canvas: UICanvas):
         new_ref_w, new_ref_h = ctx.vector2("Reference Size", float(canvas.reference_width), float(canvas.reference_height), 1.0, lw)
         _apply_if_changed(canvas, "reference_width", canvas.reference_width, max(1, int(round(new_ref_w))))
         _apply_if_changed(canvas, "reference_height", canvas.reference_height, max(1, int(round(new_ref_h))))
+
+    # ── Canvas Scaler (Unity-aligned) ──
+    if render_compact_section_header(ctx, t("ui_comp.canvas_scaler"), level="secondary"):
+        scale_members = list(UIScaleMode)
+        scale_labels = [m.name for m in scale_members]
+        try:
+            scale_idx = scale_members.index(canvas.ui_scale_mode)
+        except ValueError:
+            scale_idx = 1  # ScaleWithScreenSize default
+        field_label(ctx, t("ui_comp.ui_scale_mode"), lw)
+        new_scale_idx = ctx.combo("##canvas_scale_mode", scale_idx, scale_labels, -1)
+        new_scale_mode = scale_members[new_scale_idx]
+        _apply_if_changed(canvas, "ui_scale_mode", canvas.ui_scale_mode, new_scale_mode)
+
+        if canvas.ui_scale_mode == UIScaleMode.ScaleWithScreenSize:
+            match_members = list(ScreenMatchMode)
+            match_labels = [m.name for m in match_members]
+            try:
+                match_idx = match_members.index(canvas.screen_match_mode)
+            except ValueError:
+                match_idx = 0
+            field_label(ctx, t("ui_comp.screen_match_mode"), lw)
+            new_match_idx = ctx.combo("##canvas_match_mode", match_idx, match_labels, -1)
+            new_match_mode = match_members[new_match_idx]
+            _apply_if_changed(canvas, "screen_match_mode", canvas.screen_match_mode, new_match_mode)
+
+            if canvas.screen_match_mode == ScreenMatchMode.MatchWidthOrHeight:
+                field_label(ctx, t("ui_comp.match"), lw)
+                new_match = ctx.float_slider("##canvas_match_val", float(canvas.match_width_or_height), 0.0, 1.0)
+                if abs(float(new_match) - float(canvas.match_width_or_height)) > 1e-5:
+                    _apply_if_changed(canvas, "match_width_or_height", canvas.match_width_or_height, float(new_match))
+
+        new_pp = render_inspector_checkbox(ctx, t("ui_comp.pixel_perfect"), bool(canvas.pixel_perfect))
+        _apply_if_changed(canvas, "pixel_perfect", canvas.pixel_perfect, bool(new_pp))
+
+        field_label(ctx, t("ui_comp.ref_pixels_per_unit"), lw)
+        new_rppu = ctx.drag_float("##canvas_rppu", float(canvas.reference_pixels_per_unit), 1.0, 1.0, 10000.0)
+        if abs(float(new_rppu) - float(canvas.reference_pixels_per_unit)) > 0.01:
+            _apply_if_changed(canvas, "reference_pixels_per_unit", canvas.reference_pixels_per_unit, max(1.0, float(new_rppu)))
 
 
 def _render_text_inspector(ctx, text_comp: UIText):

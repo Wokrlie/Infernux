@@ -503,6 +503,14 @@ class Theme:
     UI_EDITOR_CANVAS_BG       : RGBA = (0.12, 0.12, 0.12, 1.0)  # Canvas background (neutral dark)
     UI_EDITOR_CANVAS_BORDER   : RGBA = (0.30, 0.30, 0.30, 1.0)  # Canvas border (neutral gray)
 
+    # -- Multi-Canvas Layout
+    UI_EDITOR_CANVAS_HEADER_H      : float = 22.0   # Canvas header bar height (screen px)
+    UI_EDITOR_CANVAS_HEADER_BG     : RGBA = (0.18, 0.18, 0.18, 1.0)
+    UI_EDITOR_CANVAS_HEADER_BG_FOC : RGBA = (0.22, 0.30, 0.36, 1.0)  # Focused canvas header
+    UI_EDITOR_CANVAS_HEADER_TEXT   : RGBA = (0.85, 0.85, 0.85, 1.0)
+    UI_EDITOR_CANVAS_SPACING       : float = 60.0   # Auto-layout gap between canvases (workspace px)
+    UI_EDITOR_CANVAS_INACTIVE_ALPHA: float = 0.35    # Alpha multiplier for inactive canvases
+
     # -- Element Interaction
     UI_EDITOR_ELEMENT_HOVER   : RGBA = (0.00, 0.74, 0.83, 0.12)  # Element hover (cyan glow)
     UI_EDITOR_ELEMENT_SELECT  : RGBA = (0.00, 0.74, 0.83, 1.0)  # Element selected (electric cyan)
@@ -647,6 +655,7 @@ class Theme:
     ICON_IMG_PICKER    : str = "picker"
     ICON_IMG_WARNING   : str = "warning"
     ICON_IMG_ERROR     : str = "error"
+    ICON_IMG_UI_CANVAS : str = "ui_canvas"
     ICON_IMG_UI_TEXT   : str = "ui_text"
     ICON_IMG_UI_IMAGE  : str = "ui_image"
     ICON_IMG_UI_BUTTON : str = "ui_button"

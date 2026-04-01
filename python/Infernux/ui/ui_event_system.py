@@ -110,6 +110,12 @@ class UIEventProcessor:
         # Iterate in reverse sort order (highest sort_order on top)
         for i in range(len(canvases) - 1, -1, -1):
             canvas = canvases[i]
+            # Skip inactive canvases
+            canvas_go = canvas.game_object
+            if canvas_go is not None and not canvas_go.active_in_hierarchy:
+                continue
+            if not getattr(canvas, 'enabled', True):
+                continue
             cx, cy = canvas_positions[i]
             elem = canvas.raycast(cx, cy)
             if elem is not None:
