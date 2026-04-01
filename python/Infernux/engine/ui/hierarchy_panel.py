@@ -1275,7 +1275,20 @@ class HierarchyPanel(EditorPanel):
             new_index = max(0, root_count - (1 if old_parent_id is None else 0))
             if old_parent_id is not None or old_index != new_index:
                 self._execute_hierarchy_move(did, old_parent_id, None, old_index, new_index)
-    
+
+    def _finalize_created_object(self, new_obj, parent_id, description: str) -> None:
+        """Common post-creation: parent, select, record, notify."""
+        from Infernux.lib import SceneManager
+        scene = SceneManager.instance().get_active_scene()
+        if parent_id is not None and scene:
+            parent = scene.find_by_id(parent_id)
+            if parent:
+                new_obj.set_parent(parent)
+                self._pending_expand_id = parent_id
+        self._sel.select(new_obj.id)
+        self._record_create(new_obj.id, description)
+        self._notify_selection_changed()
+
     def _show_create_primitive_menu(self, ctx: InxGUIContext, parent_id: int = None) -> None:
         """Show the Create 3D Object submenu."""
         from Infernux.lib import SceneManager, PrimitiveType
@@ -1296,16 +1309,8 @@ class HierarchyPanel(EditorPanel):
             if ctx.selectable(name, False, 0, 0, 0):
                 new_obj = scene.create_primitive(prim_type)
                 if new_obj:
-                    # Set parent if specified
-                    if parent_id is not None:
-                        parent = scene.find_by_id(parent_id)
-                        if parent:
-                            new_obj.set_parent(parent)
-                            self._pending_expand_id = parent_id
-                    self._sel.select(new_obj.id)
-                    self._record_create(new_obj.id, f"Create {name.split()[0]}")
-                    # Notify Inspector about the new selection
-                    self._notify_selection_changed()
+                    self._finalize_created_object(new_obj, parent_id,
+                                                  f"Create {name.split()[0]}")
     
     def _show_create_light_menu(self, ctx: InxGUIContext, parent_id: int = None) -> None:
         """Show the Create Light submenu."""
@@ -1345,15 +1350,9 @@ class HierarchyPanel(EditorPanel):
                             light_comp.outer_spot_angle = 45.0
                             light_comp.spot_angle = 30.0
 
-                    # Set parent if specified
-                    if parent_id is not None:
-                        parent = scene.find_by_id(parent_id)
-                        if parent:
-                            new_obj.set_parent(parent)
-                            self._pending_expand_id = parent_id
-                    self._sel.select(new_obj.id)
-                    self._record_create(new_obj.id, f"Create {name.split()[0]}")
-                    self._notify_selection_changed()
+                    # Set parent + finalize
+                    self._finalize_created_object(new_obj, parent_id,
+                                                  f"Create {name.split()[0]}")
 
     def _show_create_rendering_menu(self, ctx: InxGUIContext, parent_id: int = None) -> None:
         """Show the Rendering submenu."""
@@ -1369,16 +1368,7 @@ class HierarchyPanel(EditorPanel):
         if scene:
             new_obj = scene.create_game_object("GameObject")
             if new_obj:
-                # Set parent if specified
-                if parent_id is not None:
-                    parent = scene.find_by_id(parent_id)
-                    if parent:
-                        new_obj.set_parent(parent)
-                        self._pending_expand_id = parent_id
-                self._sel.select(new_obj.id)
-                self._record_create(new_obj.id, "Create Empty")
-                # Notify Inspector about the new selection
-                self._notify_selection_changed()
+                self._finalize_created_object(new_obj, parent_id, "Create Empty")
 
     def _create_camera_object(self, parent_id: int = None) -> None:
         """Create a Camera GameObject in the scene."""
@@ -1399,18 +1389,11 @@ class HierarchyPanel(EditorPanel):
         if camera_comp is None:
             return
 
-        if parent_id is not None:
-            parent = scene.find_by_id(parent_id)
-            if parent:
-                new_obj.set_parent(parent)
-                self._pending_expand_id = parent_id
-        elif not has_main_camera:
+        if parent_id is None and not has_main_camera:
             new_obj.tag = "MainCamera"
             new_obj.transform.position = Vector3(0.0, 1.0, -10.0)
 
-        self._sel.select(new_obj.id)
-        self._record_create(new_obj.id, "Create Camera")
-        self._notify_selection_changed()
+        self._finalize_created_object(new_obj, parent_id, "Create Camera")
 
     def _create_render_stack_object(self, parent_id: int = None) -> None:
         """Create a RenderStack GameObject in the scene."""
@@ -1430,15 +1413,7 @@ class HierarchyPanel(EditorPanel):
             GameObject.destroy(new_obj)
             return
 
-        if parent_id is not None:
-            parent = scene.find_by_id(parent_id)
-            if parent:
-                new_obj.set_parent(parent)
-                self._pending_expand_id = parent_id
-
-        self._sel.select(new_obj.id)
-        self._record_create(new_obj.id, "Create RenderStack")
-        self._notify_selection_changed()
+        self._finalize_created_object(new_obj, parent_id, "Create RenderStack")
 
     def _create_model_object(self, model_ref: str, parent_id: int = None, is_guid: bool = False) -> None:
         """Create a GameObject hierarchy from a dropped 3D model asset.
@@ -1464,14 +1439,7 @@ class HierarchyPanel(EditorPanel):
         if not new_obj:
             return
 
-        if parent_id is not None:
-            parent = scene.find_by_id(parent_id)
-            if parent:
-                new_obj.set_parent(parent)
-                self._pending_expand_id = parent_id
-        self._sel.select(new_obj.id)
-        self._record_create(new_obj.id, "Create Model")
-        self._notify_selection_changed()
+        self._finalize_created_object(new_obj, parent_id, "Create Model")
 
     def _instantiate_prefab(self, prefab_ref: str, parent_id: int = None, is_guid: bool = False) -> None:
         """Instantiate a prefab dropped from the Project panel into the scene."""
@@ -1773,74 +1741,54 @@ class HierarchyPanel(EditorPanel):
             self._record_create(go.id, "Create Canvas")
             self._notify_selection_changed()
 
+    @staticmethod
+    def _find_canvas_parent_id(scene, parent_id):
+        """Walk up from *parent_id* to find the nearest Canvas ancestor ID.
+
+        Returns the canvas ancestor's ID, or *parent_id* unchanged when no
+        canvas is found in the ancestor chain.
+        """
+        if parent_id is None:
+            return None
+        from Infernux.ui import UICanvas
+        obj = scene.find_by_id(parent_id)
+        if not obj:
+            return parent_id
+        current = obj
+        while current is not None:
+            for c in current.get_py_components():
+                if isinstance(c, UICanvas):
+                    return current.id
+            current = current.get_parent()
+        return parent_id  # no canvas found — use as-is
+
     def _create_ui_text(self, parent_id: int = None):
         """Create a Text GameObject with UIText component under a Canvas."""
         from Infernux.lib import SceneManager
-        from Infernux.ui import UIText as UITextCls, UICanvas
+        from Infernux.ui import UIText as UITextCls
         from Infernux.ui.ui_canvas_utils import invalidate_canvas_cache
         scene = SceneManager.instance().get_active_scene()
         if not scene:
             return
 
-        # Find a suitable canvas parent
-        canvas_parent_id = parent_id
-        if canvas_parent_id is not None:
-            # Check if the parent (or an ancestor) is a Canvas
-            obj = scene.find_by_id(canvas_parent_id)
-            if obj:
-                found_canvas = False
-                current = obj
-                while current is not None:
-                    for c in current.get_py_components():
-                        if isinstance(c, UICanvas):
-                            canvas_parent_id = current.id
-                            found_canvas = True
-                            break
-                    if found_canvas:
-                        break
-                    current = current.get_parent()
-                if not found_canvas:
-                    canvas_parent_id = obj.id  # still use as parent
+        canvas_parent_id = self._find_canvas_parent_id(scene, parent_id)
 
         go = scene.create_game_object("Text")
         if go:
             go.add_py_component(UITextCls())
-            if canvas_parent_id is not None:
-                parent = scene.find_by_id(canvas_parent_id)
-                if parent:
-                    go.set_parent(parent)
-                    self._pending_expand_id = canvas_parent_id
+            self._finalize_created_object(go, canvas_parent_id, "Create Text")
             invalidate_canvas_cache()
-            self._sel.select(go.id)
-            self._record_create(go.id, "Create Text")
-            self._notify_selection_changed()
 
     def _create_ui_button(self, parent_id: int = None):
         """Create a Button GameObject with UIButton component under a Canvas."""
         from Infernux.lib import SceneManager
-        from Infernux.ui import UIButton as UIButtonCls, UICanvas
+        from Infernux.ui import UIButton as UIButtonCls
         from Infernux.ui.ui_canvas_utils import invalidate_canvas_cache
         scene = SceneManager.instance().get_active_scene()
         if not scene:
             return
 
-        canvas_parent_id = parent_id
-        if canvas_parent_id is not None:
-            obj = scene.find_by_id(canvas_parent_id)
-            if obj:
-                found_canvas = False
-                current = obj
-                while current is not None:
-                    for c in current.get_py_components():
-                        if isinstance(c, UICanvas):
-                            canvas_parent_id = current.id
-                            found_canvas = True
-                            break
-                    if found_canvas:
-                        break
-                    current = current.get_parent()
-                if not found_canvas:
-                    canvas_parent_id = obj.id
+        canvas_parent_id = self._find_canvas_parent_id(scene, parent_id)
 
         go = scene.create_game_object("Button")
         if go:
@@ -1848,12 +1796,5 @@ class HierarchyPanel(EditorPanel):
             btn.width = 160.0
             btn.height = 40.0
             go.add_py_component(btn)
-            if canvas_parent_id is not None:
-                parent = scene.find_by_id(canvas_parent_id)
-                if parent:
-                    go.set_parent(parent)
-                    self._pending_expand_id = canvas_parent_id
+            self._finalize_created_object(go, canvas_parent_id, "Create Button")
             invalidate_canvas_cache()
-            self._sel.select(go.id)
-            self._record_create(go.id, "Create Button")
-            self._notify_selection_changed()
