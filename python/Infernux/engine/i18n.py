@@ -278,6 +278,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "ui_editor.no_canvas":              {"en": "No UICanvas in scene",      "zh": "场景中没有 Canvas"},
     "ui_editor.create_canvas_hint":     {"en": "Right-click in Hierarchy → Create → UI → Canvas\nor use the button below", "zh": "在 Hierarchy 中右键 → 创建 → UI → Canvas\n或使用下方按钮快速创建"},
     "ui_editor.create_canvas":          {"en": "Create Canvas",             "zh": "创建 Canvas"},
+    "ui_editor.tooltip_canvas":         {"en": "Create Canvas",              "zh": "创建 Canvas"},
     "ui_editor.tooltip_text":           {"en": "Text",                      "zh": "文本"},
     "ui_editor.tooltip_image":          {"en": "Image",                     "zh": "图像"},
     "ui_editor.tooltip_button":         {"en": "Button",                    "zh": "按钮"},

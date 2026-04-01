@@ -662,8 +662,11 @@ class ReparentCommand(UndoCommand):
         if not obj:
             return
         new_parent = scene.find_by_id(parent_id) if parent_id is not None else None
+        old_parent = obj.get_parent()
         _preserve_ui_world_position(obj, new_parent)
         obj.set_parent(new_parent)
+        _invalidate_canvas_caches(old_parent)
+        _invalidate_canvas_caches(new_parent)
 
 
 class MoveGameObjectCommand(UndoCommand):
@@ -702,6 +705,9 @@ class MoveGameObjectCommand(UndoCommand):
         if current_parent is not parent:
             _preserve_ui_world_position(obj, parent)
             obj.set_parent(parent)
+            # Invalidate UICanvas element caches on both old and new trees
+            _invalidate_canvas_caches(current_parent)
+            _invalidate_canvas_caches(parent)
 
         transform = getattr(obj, "transform", None)
         if transform is not None:
@@ -1510,13 +1516,38 @@ def _destroy_game_object_immediately(scene, obj) -> None:
     _notify_gizmos_scene_changed()
 
 
+def _invalidate_canvas_caches(go) -> None:
+    """Walk up from *go* to find the nearest UICanvas and invalidate its element cache."""
+    if go is None:
+        return
+    from Infernux.ui import UICanvas
+    cur = go
+    while cur is not None:
+        for comp in cur.get_py_components():
+            if isinstance(comp, UICanvas):
+                comp.invalidate_element_cache()
+                return
+        cur = cur.get_parent()
+
+
 def _preserve_ui_world_position(obj, new_parent) -> None:
     """Adjust UI element local x/y so that its world position is preserved after reparenting.
 
     Called *before* ``obj.set_parent(new_parent)``.  Only affects GameObjects
     that carry an ``InxUIScreenComponent``; silently no-ops otherwise.
+
+    The coordinate system uses the **direct parent** as reference frame.
+    get_rect() returns (abs_x, abs_y, w, h) in canvas-space; local x/y
+    is the offset from ``parent_world_rect_origin + anchor_offset``.
+
+    To keep the element's canvas-space position unchanged after reparenting:
+        new_local = old_abs - new_parent_abs - new_anchor
+    When moving across canvases with different resolutions we simply keep
+    the canvas-space coordinates (no scaling), so the element stays at the
+    same proportional spot only if resolutions are equal; otherwise it
+    keeps its pixel offset which is the most predictable behaviour.
     """
-    from Infernux.ui.inx_ui_screen_component import InxUIScreenComponent
+    from Infernux.ui.inx_ui_screen_component import InxUIScreenComponent, clear_rect_cache
     from Infernux.ui import UICanvas
 
     # Find the screen-component on the dragged object
@@ -1537,16 +1568,21 @@ def _preserve_ui_world_position(obj, new_parent) -> None:
             go = go.get_parent()
         return None
 
-    canvas = _find_canvas(obj.get_parent() or obj)
-    if canvas is None:
+    old_canvas = _find_canvas(obj.get_parent() or obj)
+    if old_canvas is None:
         return
-    cw = float(canvas.reference_width)
-    ch = float(canvas.reference_height)
+    old_cw = float(old_canvas.reference_width)
+    old_ch = float(old_canvas.reference_height)
 
-    # Compute current world rect (x, y, w, h) under the OLD parent
-    world_x, world_y, w, h = ui_comp.get_rect(cw, ch)
+    # Absolute canvas-space position under the OLD parent chain
+    old_abs_x, old_abs_y, _w, _h = ui_comp.get_rect(old_cw, old_ch)
 
-    # Compute what the new parent's world rect will be
+    # Determine new canvas resolution
+    new_canvas = _find_canvas(new_parent) if new_parent is not None else None
+    ncw = float(new_canvas.reference_width) if new_canvas is not None else old_cw
+    nch = float(new_canvas.reference_height) if new_canvas is not None else old_ch
+
+    # New parent's absolute canvas-space rect in the NEW canvas
     if new_parent is not None:
         new_parent_ui = None
         for c in new_parent.get_py_components():
@@ -1554,16 +1590,22 @@ def _preserve_ui_world_position(obj, new_parent) -> None:
                 new_parent_ui = c
                 break
         if new_parent_ui is not None:
-            npx, npy, npw, nph = new_parent_ui.get_rect(cw, ch)
+            npx, npy, npw, nph = new_parent_ui.get_rect(ncw, nch)
         else:
-            npx, npy, npw, nph = 0.0, 0.0, cw, ch
+            npx, npy, npw, nph = 0.0, 0.0, ncw, nch
     else:
-        npx, npy, npw, nph = 0.0, 0.0, cw, ch
+        npx, npy, npw, nph = 0.0, 0.0, ncw, nch
 
-    # Recompute local x/y so that (npx + anchor_in_new_parent + x) == world_x
+    # Anchor offset within the new parent
     anchor_x, anchor_y = ui_comp._anchor_origin(npw, nph)
-    ui_comp.x = world_x - npx - anchor_x
-    ui_comp.y = world_y - npy - anchor_y
+
+    # Set local x/y so the element lands at the same canvas-space position.
+    # If canvases differ, the pixel offset is kept (no proportional scaling).
+    ui_comp.x = old_abs_x - npx - anchor_x
+    ui_comp.y = old_abs_y - npy - anchor_y
+
+    # Invalidate the rect cache so subsequent get_rect calls see fresh data
+    clear_rect_cache(-1)
 
 
 def _recreate_game_object_from_json(json_str: str,
@@ -2496,8 +2538,11 @@ class HierarchyUndoTracker:
             if obj:
                 parent = (scene.find_by_id(new_parent_id)
                           if new_parent_id is not None else None)
+                old_parent = obj.get_parent()
                 _preserve_ui_world_position(obj, parent)
                 obj.set_parent(parent)
+                _invalidate_canvas_caches(old_parent)
+                _invalidate_canvas_caches(parent)
                 from Infernux.engine.scene_manager import SceneFileManager
                 sfm = SceneFileManager.instance()
                 if sfm:
@@ -2524,8 +2569,11 @@ class HierarchyUndoTracker:
             if obj:
                 parent = (scene.find_by_id(new_parent_id)
                           if new_parent_id is not None else None)
+                old_parent = obj.get_parent()
                 _preserve_ui_world_position(obj, parent)
                 obj.set_parent(parent)
+                _invalidate_canvas_caches(old_parent)
+                _invalidate_canvas_caches(parent)
                 transform = getattr(obj, 'transform', None)
                 if transform is not None:
                     transform.set_sibling_index(max(0, int(new_sibling_index)))

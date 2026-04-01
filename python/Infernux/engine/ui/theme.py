@@ -655,6 +655,7 @@ class Theme:
     ICON_IMG_PICKER    : str = "picker"
     ICON_IMG_WARNING   : str = "warning"
     ICON_IMG_ERROR     : str = "error"
+    ICON_IMG_UI_CANVAS : str = "ui_canvas"
     ICON_IMG_UI_TEXT   : str = "ui_text"
     ICON_IMG_UI_IMAGE  : str = "ui_image"
     ICON_IMG_UI_BUTTON : str = "ui_button"

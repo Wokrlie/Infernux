@@ -169,10 +169,25 @@ class InxScreenUIRenderer
      */
     bool CreateCompatibleRenderPass();
 
+    // Per-list vertex / index buffers (Camera and Overlay each need their
+    // own GPU buffers because both Render() calls are recorded into the same
+    // command buffer — the second upload must not overwrite the first while
+    // the GPU has not yet executed it.)
+    struct ListBuffers
+    {
+        VkBuffer vertexBuffer = VK_NULL_HANDLE;
+        VmaAllocation vertexAlloc = VK_NULL_HANDLE;
+        VkDeviceSize vertexBufferSize = 0;
+
+        VkBuffer indexBuffer = VK_NULL_HANDLE;
+        VmaAllocation indexAlloc = VK_NULL_HANDLE;
+        VkDeviceSize indexBufferSize = 0;
+    };
+
     /**
      * @brief Ensure vertex/index buffers are large enough
      */
-    bool EnsureBuffers(VkDeviceSize vertexSize, VkDeviceSize indexSize);
+    bool EnsureBuffers(ListBuffers &buf, VkDeviceSize vertexSize, VkDeviceSize indexSize);
 
     /**
      * @brief Get the ImDrawList for a given list
@@ -217,14 +232,7 @@ class InxScreenUIRenderer
     // Font atlas descriptor (points to ImGui's font atlas)
     VkDescriptorSet m_fontDescriptorSet = VK_NULL_HANDLE;
 
-    // Vertex / Index buffers
-    VkBuffer m_vertexBuffer = VK_NULL_HANDLE;
-    VmaAllocation m_vertexAlloc = VK_NULL_HANDLE;
-    VkDeviceSize m_vertexBufferSize = 0;
-
-    VkBuffer m_indexBuffer = VK_NULL_HANDLE;
-    VmaAllocation m_indexAlloc = VK_NULL_HANDLE;
-    VkDeviceSize m_indexBufferSize = 0;
+    ListBuffers m_listBuffers[2]; // [0] = Camera, [1] = Overlay
 
     // ImDrawList instances (standalone, not attached to any ImGui window)
     ImDrawList *m_cameraDrawList = nullptr;

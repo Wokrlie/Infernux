@@ -171,10 +171,21 @@ class UICanvas(InxUIComponent):
     # ------------------------------------------------------------------
 
     def iter_ui_elements(self):
-        """Yield all screen-space UI components on child GameObjects (depth-first)."""
+        """Yield this canvas's screen-space UI components (depth-first).
+
+        Nested child canvases define their own rendering and input islands, so
+        their subtrees must not be folded into the parent canvas. This matches
+        Unity-style nested canvas semantics where each canvas owns its own draw
+        list and render mode.
+        """
         go = self.game_object
         if go is None:
             return
+        from .inx_ui_screen_component import InxUIScreenComponent
+
+        for comp in go.get_py_components():
+            if isinstance(comp, InxUIScreenComponent):
+                yield comp
         yield from self._walk_children(go)
 
     def _walk_children(self, parent):
@@ -185,7 +196,7 @@ class UICanvas(InxUIComponent):
                     yield comp
             yield from self._walk_children(child)
 
-    def raycast(self, canvas_x: float, canvas_y: float):
+    def raycast(self, canvas_x: float, canvas_y: float, tolerance: float = 0.0):
         """Return the front-most element hit at (canvas_x, canvas_y), or None.
 
         Iterates children in reverse depth-first order (last drawn = top).
@@ -202,13 +213,14 @@ class UICanvas(InxUIComponent):
                 continue
             # AABB pre-rejection: skip expensive contains_point if outside visual rect
             vx, vy, vw, vh = elem.get_visual_rect(ref_w, ref_h)
-            if not (vx <= canvas_x <= vx + vw and vy <= canvas_y <= vy + vh):
+            if not (vx - tolerance <= canvas_x <= vx + vw + tolerance
+                    and vy - tolerance <= canvas_y <= vy + vh + tolerance):
                 continue
-            if elem.contains_point(canvas_x, canvas_y, ref_w, ref_h):
+            if elem.contains_point(canvas_x, canvas_y, ref_w, ref_h, tolerance):
                 return elem
         return None
 
-    def raycast_all(self, canvas_x: float, canvas_y: float):
+    def raycast_all(self, canvas_x: float, canvas_y: float, tolerance: float = 0.0):
         """Return all elements hit at (canvas_x, canvas_y), front-to-back order."""
         ref_w = float(self.reference_width)
         ref_h = float(self.reference_height)
@@ -221,8 +233,9 @@ class UICanvas(InxUIComponent):
                 continue
             # AABB pre-rejection
             vx, vy, vw, vh = elem.get_visual_rect(ref_w, ref_h)
-            if not (vx <= canvas_x <= vx + vw and vy <= canvas_y <= vy + vh):
+            if not (vx - tolerance <= canvas_x <= vx + vw + tolerance
+                    and vy - tolerance <= canvas_y <= vy + vh + tolerance):
                 continue
-            if elem.contains_point(canvas_x, canvas_y, ref_w, ref_h):
+            if elem.contains_point(canvas_x, canvas_y, ref_w, ref_h, tolerance):
                 hits.append(elem)
         return hits

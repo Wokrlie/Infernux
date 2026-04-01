@@ -123,20 +123,32 @@ class UIEditorPanel(EditorPanel):
         self._on_request_ui_mode = callback
 
     def notify_hierarchy_selection(self, go):
-        """Sync UI editor selection when hierarchy selection changes (UI mode).
+        """Sync UI editor selection when hierarchy selection changes.
 
-        If *go* has an InxUIScreenComponent, select it; otherwise clear.
+        If *go* has an InxUIScreenComponent, select it; if it's a Canvas,
+        focus that canvas; otherwise clear element selection but keep canvas
+        focus if the object is inside a canvas tree.
         """
         if go is None:
             self._clear_interaction_state()
             return
+        self._focus_canvas_for_object(go)
+        # Reset interaction state but keep focused canvas
+        self._dragging = False
+        self._resizing = False
+        self._resize_handle_idx = -1
+        self._rotating = False
+        self._active_alignment_guides = []
+        self._selected_element_comp = None
+        from Infernux.ui import UICanvas
         from Infernux.ui.inx_ui_screen_component import InxUIScreenComponent
         for comp in go.get_py_components():
+            if isinstance(comp, UICanvas):
+                self._focused_canvas_id = go.id
+                return
             if isinstance(comp, InxUIScreenComponent):
                 self._selected_element_comp = comp
                 return
-        # The selected GO has no screen component (e.g. the Canvas itself)
-        self._clear_interaction_state()
 
     def _clear_interaction_state(self):
         """Reset all selection / drag / resize state."""
@@ -258,6 +270,24 @@ class UIEditorPanel(EditorPanel):
         go, canvas = all_canvases[0]
         self._focused_canvas_id = go.id
         return go, canvas
+
+    def _find_canvas_for_object(self, go, all_canvases=None):
+        """Return the owning canvas pair for *go*, or (None, None)."""
+        if go is None:
+            return None, None
+        if all_canvases is None:
+            all_canvases = self._get_all_canvases()
+        for canvas_go, canvas in all_canvases:
+            if self._is_descendant_of(go.id, canvas_go):
+                return canvas_go, canvas
+        return None, None
+
+    def _focus_canvas_for_object(self, go, all_canvases=None):
+        """Set the focused canvas to the one that owns *go*."""
+        canvas_go, canvas = self._find_canvas_for_object(go, all_canvases)
+        if canvas_go is not None:
+            self._focused_canvas_id = canvas_go.id
+        return canvas_go, canvas
 
     # ------------------------------------------------------------------
     # Multi-canvas layout helpers
@@ -525,14 +555,15 @@ class UIEditorPanel(EditorPanel):
         self._load_view_settings()
 
     def _on_visible_pre(self, ctx):
-        focused = ctx.is_window_focused(0)
-        if focused and not self._was_focused:
-            if self._on_request_ui_mode:
-                self._on_request_ui_mode(True)
-        elif not focused and self._was_focused:
-            if self._on_request_ui_mode:
-                self._on_request_ui_mode(False)
-        self._was_focused = focused
+        # Keep UI mode active the entire time the panel is visible
+        if self._on_request_ui_mode:
+            self._on_request_ui_mode(True)
+        self._was_focused = ctx.is_window_focused(0)
+
+    def _on_not_visible(self, ctx):
+        if self._on_request_ui_mode:
+            self._on_request_ui_mode(False)
+        self._was_focused = False
 
     def on_render_content(self, ctx: InxGUIContext):
         all_canvases = self._get_all_canvases()
@@ -571,6 +602,12 @@ class UIEditorPanel(EditorPanel):
         native = self._engine.get_native_engine() if self._engine else None
         _ICO_SZ = Theme.EDITOR_ICON_SIZE
 
+        # ── Create Canvas button ──
+        ctx.button("Canvas", self._create_canvas, width=72, height=_ICO_SZ + 8)
+        if ctx.is_item_hovered():
+            ctx.set_tooltip(t("ui_editor.tooltip_canvas"))
+
+        ctx.same_line(0, _GAP)
         tid_text = EditorIcons.get(native, Theme.ICON_IMG_UI_TEXT)
         if tid_text:
             if ctx.image_button("##add_text", tid_text, _ICO_SZ, _ICO_SZ):
@@ -751,6 +788,7 @@ class UIEditorPanel(EditorPanel):
         hovered_elem = None
         hovered_all: list = []
         HEADER_H = Theme.UI_EDITOR_CANVAS_HEADER_H
+        _PICK_TOL = 3.0 / self._zoom  # 3 screen-px tolerance in canvas space
 
         for canvas_go, canvas in all_canvases:
             go_id = canvas_go.id
@@ -805,28 +843,37 @@ class UIEditorPanel(EditorPanel):
                 ctx.draw_text(c_tl_x + 6, h_tl_y + 3, label,
                               tc[0], tc[1], tc[2], tc[3] * alpha_mult, 0.0)
 
-            # ── Draw canvas background & border ──
+            # ── Draw canvas background ──
             if canvas_visible:
                 bg = Theme.UI_EDITOR_CANVAS_BG
                 ctx.draw_filled_rect(v_tl_x, v_tl_y, v_br_x, v_br_y,
                                      bg[0], bg[1], bg[2], bg[3] * alpha_mult, 0.0)
-                bd = Theme.UI_EDITOR_CANVAS_BORDER
-                ctx.draw_rect(v_tl_x, v_tl_y, v_br_x, v_br_y,
-                              bd[0], bd[1], bd[2], bd[3] * alpha_mult, 1.0, 0.0)
 
             # ── Hit-test: is mouse over this canvas? ──
             if area_hovered and not self._dragging_canvas:
                 if (c_tl_x <= inp.mouse_x <= c_br_x
                         and h_tl_y <= inp.mouse_y <= c_br_y):
                     hovered_canvas_id = go_id
-                    if (is_active and c_tl_y <= inp.mouse_y <= c_br_y):
+                    # Only pick elements on the focused canvas (or any if none focused)
+                    if (is_active and c_tl_y <= inp.mouse_y <= c_br_y
+                            and (is_focused or not self._focused_canvas_id)):
                         cmx, cmy = self._screen_to_canvas(
                             inp.mouse_x, inp.mouse_y, origin_x, origin_y)
                         if 0.0 <= cmx <= ref_w and 0.0 <= cmy <= ref_h:
-                            _all = canvas.raycast_all(cmx, cmy)
+                            _all = canvas.raycast_all(cmx, cmy, _PICK_TOL)
                             if _all:
                                 hovered_all = _all
                                 hovered_elem = _all[0]
+                # Focused canvas: also pick elements outside canvas bounds
+                if is_focused and is_active and not hovered_elem:
+                    cmx, cmy = self._screen_to_canvas(
+                        inp.mouse_x, inp.mouse_y, origin_x, origin_y)
+                    _all = canvas.raycast_all(cmx, cmy, _PICK_TOL)
+                    if _all:
+                        hovered_all = _all
+                        hovered_elem = _all[0]
+                        if not hovered_canvas_id:
+                            hovered_canvas_id = go_id
 
             # ── Skip element rendering for inactive canvases ──
             if not is_active:
@@ -890,6 +937,25 @@ class UIEditorPanel(EditorPanel):
                     if tx < area_max_x and ty < area_max_y:
                         ctx.draw_text(tx, ty,
                                       elem.type_name, *Theme.UI_EDITOR_FALLBACK_TEXT, 0.0)
+
+        # ── Fallback hit-test: focused canvas elements outside canvas bounds ──
+        if not hovered_elem and self._focused_canvas_id and area_hovered and not self._dragging_canvas:
+            for cgo, cv in all_canvases:
+                if cgo.id != self._focused_canvas_id:
+                    continue
+                if not cgo.active_in_hierarchy or not getattr(cv, 'enabled', True):
+                    break
+                pp = self._canvas_panel_positions.get(cgo.id, [0.0, 0.0])
+                foc_ox = area_min_x + pp[0] * self._zoom
+                foc_oy = area_min_y + pp[1] * self._zoom
+                cmx, cmy = self._screen_to_canvas(inp.mouse_x, inp.mouse_y, foc_ox, foc_oy)
+                _all = cv.raycast_all(cmx, cmy, _PICK_TOL)
+                if _all:
+                    hovered_all = _all
+                    hovered_elem = _all[0]
+                    if not hovered_canvas_id:
+                        hovered_canvas_id = cgo.id
+                break
 
         # ══════════════════════════════════════════════════════════════
         #  Selection overlay (focused canvas only)
@@ -989,9 +1055,9 @@ class UIEditorPanel(EditorPanel):
             self._select_element(hovered_all[self._pick_cycle_index])
 
         elif inp.lmb_clicked and not inp.space_down:
-            # Check if clicking on a canvas header → start canvas drag
+            # Check if clicking on canvas header (or empty-canvas body) → start canvas drag
+            clicked_canvas_header = None
             if hovered_canvas_id and not hovered_elem:
-                # Find the hovered canvas header
                 for cgo, cv in all_canvases:
                     if cgo.id != hovered_canvas_id:
                         continue
@@ -999,8 +1065,10 @@ class UIEditorPanel(EditorPanel):
                     ox = area_min_x + pp[0] * self._zoom
                     oy = area_min_y + pp[1] * self._zoom
                     ct_y = round(oy + self._pan_y)
-                    if inp.mouse_y < ct_y:
-                        # Mouse is in header area → start canvas panel drag
+                    in_header = inp.mouse_y < ct_y
+                    canvas_empty = not any(cv.iter_ui_elements())
+                    if in_header or canvas_empty:
+                        clicked_canvas_header = cgo
                         self._dragging_canvas = True
                         self._drag_canvas_id = cgo.id
                         self._drag_canvas_start_mx = inp.mouse_x
@@ -1013,7 +1081,9 @@ class UIEditorPanel(EditorPanel):
             if hovered_canvas_id:
                 self._focused_canvas_id = hovered_canvas_id
 
-            if not self._dragging_canvas:
+            if clicked_canvas_header is not None:
+                self._select_canvas(clicked_canvas_header)
+            elif not self._dragging_canvas:
                 # Recalculate focused origin after possible focus change
                 foc_origin_x, foc_origin_y = self._get_focused_canvas_origin(
                     area_min_x, area_min_y, all_canvases)
@@ -1066,6 +1136,12 @@ class UIEditorPanel(EditorPanel):
                     self._drag_elem_start_x = drag_x
                     self._drag_elem_start_y = drag_y
                     self._undo_pre_drag = (float(hovered_elem.x), float(hovered_elem.y))
+                elif hovered_canvas_id:
+                    # Clicked on canvas body (no element) → select the canvas
+                    for cgo, _cv in all_canvases:
+                        if cgo.id == hovered_canvas_id:
+                            self._select_canvas(cgo)
+                            break
                 else:
                     self._select_element(None)
 
@@ -1595,12 +1671,27 @@ class UIEditorPanel(EditorPanel):
         if self._on_selection_changed:
             if elem_comp is not None:
                 go = elem_comp.game_object
+                self._focus_canvas_for_object(go)
                 self._on_selection_changed(go)
                 # Auto-expand hierarchy to reveal this object
                 if self._hierarchy_panel and go is not None:
                     self._hierarchy_panel.expand_to_object(go)
             else:
                 self._on_selection_changed(None)
+
+    def _select_canvas(self, canvas_go):
+        """Select a canvas GameObject and sync with hierarchy/inspector."""
+        self._clear_interaction_state()
+        if canvas_go is None:
+            if self._on_selection_changed:
+                self._on_selection_changed(None)
+            return
+
+        self._focused_canvas_id = canvas_go.id
+        if self._on_selection_changed:
+            self._on_selection_changed(canvas_go)
+        if self._hierarchy_panel is not None:
+            self._hierarchy_panel.expand_to_object(canvas_go)
 
     def _delete_selected_element(self):
         """Delete the currently selected UI element's GameObject via undo system."""
@@ -1649,10 +1740,13 @@ class UIEditorPanel(EditorPanel):
             go = scene.create_game_object("Canvas")
             if go:
                 go.add_py_component(UICanvasCls())
+                self._focused_canvas_id = go.id
                 invalidate_canvas_cache()
                 # Select the new canvas in hierarchy
                 if self._hierarchy_panel:
                     self._hierarchy_panel.set_selected_object_by_id(go.id)
+                elif self._on_selection_changed:
+                    self._on_selection_changed(go)
         if go:
             self._record_ui_create(go.id, "Create Canvas")
 
