@@ -277,36 +277,22 @@ def _serialize_so_value(value: Any) -> Any:
             d["__path_hint__"] = value._path_hint
         return d
 
-    # Asset refs
-    from Infernux.core.asset_ref import TextureRef, ShaderRef, AudioClipRef
-    if isinstance(value, TextureRef):
-        d = {"__texture_ref__": value.guid}
-        if value.path_hint:
-            d["__path_hint__"] = value.path_hint
-        return d
-    if isinstance(value, ShaderRef):
-        d = {"__shader_ref__": value.guid}
-        if value.path_hint:
-            d["__path_hint__"] = value.path_hint
-        return d
-    if isinstance(value, AudioClipRef):
-        d = {"__audio_clip_ref__": value.guid}
-        if value.path_hint:
-            d["__path_hint__"] = value.path_hint
-        return d
+    # Asset refs (TextureRef, ShaderRef, AudioClipRef) — shared helper
+    from ._serialize_helpers import _serialize_asset_ref
+    ref_dict = _serialize_asset_ref(value)
+    if ref_dict is not None:
+        return ref_dict
 
     # ComponentRef
     from .ref_wrappers import ComponentRef
     if isinstance(value, ComponentRef):
         return value._serialize()
 
-    # Vec types
-    if hasattr(value, "x") and hasattr(value, "y") and hasattr(value, "z") and hasattr(value, "w"):
-        return [float(value.x), float(value.y), float(value.z), float(value.w)]
-    if hasattr(value, "x") and hasattr(value, "y") and hasattr(value, "z"):
-        return [float(value.x), float(value.y), float(value.z)]
-    if hasattr(value, "x") and hasattr(value, "y"):
-        return [float(value.x), float(value.y)]
+    # Vec types — shared helper
+    from ._serialize_helpers import serialize_vec
+    vec_list = serialize_vec(value)
+    if vec_list is not None:
+        return vec_list
 
     _log.warning(
         "Cannot serialize SO value of type %s — returning None.",
@@ -318,6 +304,7 @@ def _serialize_so_value(value: Any) -> Any:
 def _deserialize_so_value(value: Any, field_meta) -> Any:
     """Recursively deserialize a value for a SerializableObject field."""
     from .serialized_field import FieldType
+    from ._serialize_helpers import make_null_ref, deserialize_dict_ref
     from Infernux.math import Vector2, Vector3, vec4f
 
     if hasattr(field_meta, "field_type"):
@@ -327,32 +314,9 @@ def _deserialize_so_value(value: Any, field_meta) -> Any:
         field_type = field_meta
         element_type = None
 
+    # Null values for ref types → return a null ref wrapper (not raw None)
     if value is None:
-        if field_type == FieldType.GAME_OBJECT:
-            from .ref_wrappers import GameObjectRef
-            return GameObjectRef(persistent_id=0)
-        if field_type == FieldType.MATERIAL:
-            from .ref_wrappers import MaterialRef
-            return MaterialRef(guid="")
-        if field_type == FieldType.TEXTURE:
-            from Infernux.core.asset_ref import TextureRef
-            return TextureRef()
-        if field_type == FieldType.SHADER:
-            from Infernux.core.asset_ref import ShaderRef
-            return ShaderRef()
-        if field_type == FieldType.ASSET:
-            from Infernux.core.asset_ref import AudioClipRef
-            return AudioClipRef()
-        if field_type == FieldType.COMPONENT:
-            from .ref_wrappers import ComponentRef
-            comp_type = getattr(field_meta, "component_type", "") or ""
-            return ComponentRef(component_type=comp_type)
-        if field_type == FieldType.SERIALIZABLE_OBJECT:
-            so_cls = getattr(field_meta, "serializable_class", None)
-            if so_cls is not None:
-                return so_cls()
-            return None
-        return None
+        return make_null_ref(field_type, field_meta)
 
     if field_type == FieldType.SERIALIZABLE_OBJECT:
         if isinstance(value, dict) and "__serializable_type__" in value:
@@ -410,33 +374,6 @@ def _deserialize_so_value(value: Any, field_meta) -> Any:
         return value
 
     if isinstance(value, dict):
-        if "__game_object__" in value:
-            from .ref_wrappers import GameObjectRef
-            return GameObjectRef(persistent_id=int(value["__game_object__"]))
-        if "__prefab_ref__" in value:
-            from .ref_wrappers import PrefabRef
-            return PrefabRef(guid=value["__prefab_ref__"],
-                             path_hint=value.get("__path_hint__", ""))
-        if "__material_ref__" in value:
-            from .ref_wrappers import MaterialRef
-            return MaterialRef(guid=value["__material_ref__"],
-                               path_hint=value.get("__path_hint__", ""))
-        if "__texture_ref__" in value:
-            from Infernux.core.asset_ref import TextureRef
-            return TextureRef(guid=value["__texture_ref__"],
-                              path_hint=value.get("__path_hint__", ""))
-        if "__shader_ref__" in value:
-            from Infernux.core.asset_ref import ShaderRef
-            return ShaderRef(guid=value["__shader_ref__"],
-                             path_hint=value.get("__path_hint__", ""))
-        if "__audio_clip_ref__" in value:
-            from Infernux.core.asset_ref import AudioClipRef
-            return AudioClipRef(guid=value["__audio_clip_ref__"],
-                                path_hint=value.get("__path_hint__", ""))
-        if "__component_ref__" in value:
-            from .ref_wrappers import ComponentRef
-            return ComponentRef._from_dict(value["__component_ref__"])
-        if "__serializable_type__" in value:
-            return SerializableObject._deserialize(value)
+        return deserialize_dict_ref(value)
 
     return value

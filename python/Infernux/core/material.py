@@ -32,6 +32,18 @@ from typing import Optional, Tuple
 
 from Infernux.lib import InxMaterial
 
+# ── Vulkan blend factor constants (VkBlendFactor) ──
+_VK_BLEND_SRC_ALPHA: int = 6
+_VK_BLEND_ONE_MINUS_SRC_ALPHA: int = 7
+_VK_BLEND_OP_ADD: int = 0
+
+# ── Render queue constants ──
+_RENDER_QUEUE_OPAQUE: int = 2000
+_RENDER_QUEUE_TRANSPARENT: int = 3000
+
+# ── Default alpha clip threshold ──
+_DEFAULT_ALPHA_CLIP_THRESHOLD: float = 0.5
+
 
 class Material:
     """Pythonic wrapper around C++ InxMaterial.
@@ -216,6 +228,18 @@ class Material:
     # Render State Convenience Properties
     # ==========================================================================
 
+    def _set_render_state_field(self, field: str, value, override_name: str) -> None:
+        """Set one render-state field, commit it back, and mark the override.
+
+        This eliminates the repeated get→mutate→set→mark boilerplate from
+        each individual render-state property setter.
+        """
+        from Infernux.lib import RenderStateOverride
+        state = self._native.get_render_state()
+        setattr(state, field, value)
+        self._native.set_render_state(state)
+        self._native.mark_override(getattr(RenderStateOverride, override_name))
+
     @property
     def render_state_overrides(self) -> int:
         """Bitmask of user-overridden RenderState fields."""
@@ -232,11 +256,7 @@ class Material:
 
     @cull_mode.setter
     def cull_mode(self, value: int):
-        state = self._native.get_render_state()
-        state.cull_mode = value
-        self._native.set_render_state(state)
-        from Infernux.lib import RenderStateOverride
-        self._native.mark_override(RenderStateOverride.CULL_MODE)
+        self._set_render_state_field("cull_mode", value, "CULL_MODE")
 
     @property
     def depth_write_enable(self) -> bool:
@@ -244,11 +264,7 @@ class Material:
 
     @depth_write_enable.setter
     def depth_write_enable(self, value: bool):
-        state = self._native.get_render_state()
-        state.depth_write_enable = value
-        self._native.set_render_state(state)
-        from Infernux.lib import RenderStateOverride
-        self._native.mark_override(RenderStateOverride.DEPTH_WRITE)
+        self._set_render_state_field("depth_write_enable", value, "DEPTH_WRITE")
 
     @property
     def depth_test_enable(self) -> bool:
@@ -256,11 +272,7 @@ class Material:
 
     @depth_test_enable.setter
     def depth_test_enable(self, value: bool):
-        state = self._native.get_render_state()
-        state.depth_test_enable = value
-        self._native.set_render_state(state)
-        from Infernux.lib import RenderStateOverride
-        self._native.mark_override(RenderStateOverride.DEPTH_TEST)
+        self._set_render_state_field("depth_test_enable", value, "DEPTH_TEST")
 
     @property
     def depth_compare_op(self) -> int:
@@ -269,11 +281,7 @@ class Material:
 
     @depth_compare_op.setter
     def depth_compare_op(self, value: int):
-        state = self._native.get_render_state()
-        state.depth_compare_op = value
-        self._native.set_render_state(state)
-        from Infernux.lib import RenderStateOverride
-        self._native.mark_override(RenderStateOverride.DEPTH_COMPARE_OP)
+        self._set_render_state_field("depth_compare_op", value, "DEPTH_COMPARE_OP")
 
     @property
     def blend_enable(self) -> bool:
@@ -281,11 +289,7 @@ class Material:
 
     @blend_enable.setter
     def blend_enable(self, value: bool):
-        state = self._native.get_render_state()
-        state.blend_enable = value
-        self._native.set_render_state(state)
-        from Infernux.lib import RenderStateOverride
-        self._native.mark_override(RenderStateOverride.BLEND_ENABLE)
+        self._set_render_state_field("blend_enable", value, "BLEND_ENABLE")
 
     @property
     def surface_type(self) -> str:
@@ -298,15 +302,15 @@ class Material:
         state = self._native.get_render_state()
         if value == "transparent":
             state.blend_enable = True
-            state.src_color_blend_factor = 6   # SRC_ALPHA
-            state.dst_color_blend_factor = 7   # ONE_MINUS_SRC_ALPHA
-            state.color_blend_op = 0           # ADD
+            state.src_color_blend_factor = _VK_BLEND_SRC_ALPHA
+            state.dst_color_blend_factor = _VK_BLEND_ONE_MINUS_SRC_ALPHA
+            state.color_blend_op = _VK_BLEND_OP_ADD
             state.depth_write_enable = False
-            state.render_queue = 3000
+            state.render_queue = _RENDER_QUEUE_TRANSPARENT
         else:
             state.blend_enable = False
             state.depth_write_enable = True
-            state.render_queue = 2000
+            state.render_queue = _RENDER_QUEUE_OPAQUE
         self._native.set_render_state(state)
         self._native.mark_override(RenderStateOverride.SURFACE_TYPE)
         self._native.mark_override(RenderStateOverride.BLEND_ENABLE)
@@ -324,7 +328,7 @@ class Material:
         state = self._native.get_render_state()
         state.alpha_clip_enabled = value
         if value and state.alpha_clip_threshold <= 0.0:
-            state.alpha_clip_threshold = 0.5
+            state.alpha_clip_threshold = _DEFAULT_ALPHA_CLIP_THRESHOLD
         self._native.set_render_state(state)
         self._native.sync_alpha_clip_property()
         self._native.mark_override(RenderStateOverride.ALPHA_CLIP)

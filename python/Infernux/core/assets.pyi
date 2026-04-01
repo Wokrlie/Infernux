@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Type
 
+_META_SUPPRESSION_TIMEOUT: float
+_DEFAULT_DEBOUNCE_SEC: float
+
 
 class AssetManager:
     """Python-side asset loading & caching manager (singleton pattern)."""
@@ -79,4 +82,8 @@ class AssetManager:
     @classmethod
     def on_asset_modified(cls, path: str) -> None:
         """Notify the manager that an asset was modified on disk."""
+        ...
+    @classmethod
+    def on_material_saved(cls, path: str) -> None:
+        """Invalidate caches that depend on a material asset's file contents."""
         ...

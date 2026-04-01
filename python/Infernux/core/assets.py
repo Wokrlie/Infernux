@@ -35,6 +35,10 @@ from Infernux.core.asset_types import (
     asset_category_from_extension,
 )
 
+# ── Constants ──
+_META_SUPPRESSION_TIMEOUT: float = 2.0  # seconds
+_DEFAULT_DEBOUNCE_SEC: float = 0.35  # seconds
+
 
 class AssetManager:
     """Python-side asset loading & caching manager (singleton pattern).
@@ -81,10 +85,9 @@ class AssetManager:
         reference and AssetRegistry for unified asset management.
         """
         cls._engine = engine
-        if hasattr(engine, "get_asset_database"):
-            cls._asset_database = engine.get_asset_database()
-        elif hasattr(engine, "_engine") and hasattr(engine._engine, "get_asset_database"):
-            cls._asset_database = engine._engine.get_asset_database()
+        native = cls._native_engine()
+        if native is not None and hasattr(native, "get_asset_database"):
+            cls._asset_database = native.get_asset_database()
         # Cache the AssetRegistry singleton
         cls._registry = cls._resolve_registry()
 
@@ -147,7 +150,7 @@ class AssetManager:
             if hasattr(asset, "_guid"):
                 try:
                     asset._guid = guid
-                except Exception:
+                except (AttributeError, TypeError):
                     pass
             cls._put_cache(guid, asset)
         return asset
@@ -245,7 +248,7 @@ class AssetManager:
         # Suppress the file-watcher echo for this .meta write
         normalized = cls._normalize_asset_path(path)
         if normalized:
-            cls._meta_write_suppression[normalized] = time.monotonic() + 2.0
+            cls._meta_write_suppression[normalized] = time.monotonic() + _META_SUPPRESSION_TIMEOUT
 
         ok = apply_fn(path, settings_obj)
         if not ok:
@@ -288,7 +291,7 @@ class AssetManager:
             return False
 
     @classmethod
-    def schedule_save(cls, key: str, save_fn: Callable[[], object], debounce_sec: float = 0.35):
+    def schedule_save(cls, key: str, save_fn: Callable[[], object], debounce_sec: float = _DEFAULT_DEBOUNCE_SEC):
         """Schedule a debounced save callback for a resource key (usually file path)."""
         cls._scheduled_saves[key] = {
             "deadline": time.perf_counter() + max(0.0, float(debounce_sec)),
@@ -296,7 +299,7 @@ class AssetManager:
         }
 
     @classmethod
-    def schedule_asset_save(cls, asset_category: str, key: str, resource_obj, debounce_sec: float = 0.35):
+    def schedule_asset_save(cls, asset_category: str, key: str, resource_obj, debounce_sec: float = _DEFAULT_DEBOUNCE_SEC):
         """Schedule a debounced save by category strategy, without exposing save callback to caller."""
         cls._ensure_execution_strategies()
 
@@ -362,6 +365,14 @@ class AssetManager:
     # ==========================================================================
     # Internal helpers
     # ==========================================================================
+
+    @classmethod
+    def _native_engine(cls):
+        """Return the underlying C++ engine handle (unwrap Python wrapper if needed)."""
+        engine = cls._engine
+        if engine is None:
+            return None
+        return getattr(engine, '_engine', engine)
 
     @classmethod
     def _resolve_registry(cls):
@@ -466,10 +477,7 @@ class AssetManager:
         Falls back to path-based invalidation for textures not yet in AssetDatabase.
         """
         guid = cls._get_guid_from_path(path)
-        engine = cls._engine
-        if engine is None:
-            return
-        native = getattr(engine, '_engine', engine)
+        native = cls._native_engine()
         if native is not None and hasattr(native, 'reload_texture'):
             # Always pass the file path — C++ ReloadTexture() calls
             # GetGuidFromPath() internally, which fails if given a GUID string.
@@ -483,10 +491,7 @@ class AssetManager:
     def _reload_mesh_asset(cls, path: str) -> None:
         """Reload a mesh asset in AssetRegistry so updated import settings take effect."""
         guid = cls._get_guid_from_path(path)
-        engine = cls._engine
-        if engine is None:
-            return
-        native = getattr(engine, '_engine', engine)
+        native = cls._native_engine()
         if native is not None and hasattr(native, 'reload_mesh'):
             native.reload_mesh(path)
         if guid:
@@ -521,8 +526,7 @@ class AssetManager:
         except Exception:
             pass
 
-        engine = cls._engine
-        native = getattr(engine, '_engine', engine) if engine is not None else None
+        native = cls._native_engine()
         if native is None or not hasattr(native, 'remove_imgui_texture'):
             return
 
@@ -554,10 +558,7 @@ class AssetManager:
     @classmethod
     def _remove_material_pipeline(cls, material_key: str) -> None:
         """Remove MaterialPipelineManager render data by material key."""
-        engine = cls._engine
-        if engine is None:
-            return
-        native = getattr(engine, '_engine', engine)
+        native = cls._native_engine()
         if native is not None and hasattr(native, 'remove_material_pipeline') and material_key:
             native.remove_material_pipeline(material_key)
 
@@ -569,10 +570,7 @@ class AssetManager:
         derive the key from the path and call engine.remove_material_pipeline().
         """
         import os
-        engine = cls._engine
-        if engine is None:
-            return
-        native = getattr(engine, '_engine', engine)
+        native = cls._native_engine()
         if native is None or not hasattr(native, 'remove_material_pipeline'):
             return
         mat_name = os.path.splitext(os.path.basename(path))[0]

@@ -1210,6 +1210,7 @@ class InxComponent:
     def _deserialize_value(self, value: Any, field_meta_or_type):
         """Deserialize a value based on FieldType."""
         from Infernux.components.serialized_field import FieldType
+        from Infernux.components._serialize_helpers import make_null_ref, deserialize_dict_ref
         from Infernux.math import Vector2, Vector3, vec4f
 
         if hasattr(field_meta_or_type, 'field_type'):
@@ -1221,31 +1222,7 @@ class InxComponent:
 
         # Null values for ref types → return a null ref wrapper (not raw None)
         if value is None:
-            if field_type == FieldType.GAME_OBJECT:
-                from Infernux.components.ref_wrappers import GameObjectRef
-                return GameObjectRef(persistent_id=0)
-            if field_type == FieldType.MATERIAL:
-                from Infernux.components.ref_wrappers import MaterialRef
-                return MaterialRef(guid="")
-            if field_type == FieldType.TEXTURE:
-                from Infernux.core.asset_ref import TextureRef
-                return TextureRef()
-            if field_type == FieldType.SHADER:
-                from Infernux.core.asset_ref import ShaderRef
-                return ShaderRef()
-            if field_type == FieldType.ASSET:
-                from Infernux.core.asset_ref import AudioClipRef
-                return AudioClipRef()
-            if field_type == FieldType.COMPONENT:
-                from Infernux.components.ref_wrappers import ComponentRef
-                comp_type = getattr(field_meta_or_type, 'component_type', '') or ''
-                return ComponentRef(component_type=comp_type)
-            if field_type == FieldType.SERIALIZABLE_OBJECT:
-                so_cls = getattr(field_meta_or_type, 'serializable_class', None)
-                if so_cls is not None:
-                    return so_cls()
-                return None
-            return None
+            return make_null_ref(field_type, field_meta_or_type)
 
         if field_type == FieldType.SERIALIZABLE_OBJECT:
             if isinstance(value, dict):
@@ -1293,48 +1270,7 @@ class InxComponent:
             return self._deserialize_enum(value)
 
         if isinstance(value, dict):
-            if "__game_object__" in value:
-                from Infernux.components.ref_wrappers import GameObjectRef
-                obj_id = int(value["__game_object__"])
-                return GameObjectRef(persistent_id=obj_id)
-
-            if "__prefab_ref__" in value:
-                from Infernux.components.ref_wrappers import PrefabRef
-                guid = value["__prefab_ref__"]
-                path_hint = value.get("__path_hint__", "")
-                return PrefabRef(guid=guid, path_hint=path_hint)
-
-            if "__material_ref__" in value:
-                from Infernux.components.ref_wrappers import MaterialRef
-                guid = value["__material_ref__"]
-                path_hint = value.get("__path_hint__", "")
-                return MaterialRef(guid=guid, path_hint=path_hint)
-
-            if "__texture_ref__" in value:
-                from Infernux.core.asset_ref import TextureRef
-                guid = value["__texture_ref__"]
-                path_hint = value.get("__path_hint__", "")
-                return TextureRef(guid=guid, path_hint=path_hint)
-
-            if "__shader_ref__" in value:
-                from Infernux.core.asset_ref import ShaderRef
-                guid = value["__shader_ref__"]
-                path_hint = value.get("__path_hint__", "")
-                return ShaderRef(guid=guid, path_hint=path_hint)
-
-            if "__audio_clip_ref__" in value:
-                from Infernux.core.asset_ref import AudioClipRef
-                guid = value["__audio_clip_ref__"]
-                path_hint = value.get("__path_hint__", "")
-                return AudioClipRef(guid=guid, path_hint=path_hint)
-
-            if "__component_ref__" in value:
-                from Infernux.components.ref_wrappers import ComponentRef
-                return ComponentRef._from_dict(value["__component_ref__"])
-
-            if "__serializable_type__" in value:
-                from Infernux.components.serializable_object import SerializableObject
-                return SerializableObject._deserialize(value)
+            return deserialize_dict_ref(value)
 
         return value
 

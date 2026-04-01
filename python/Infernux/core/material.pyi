@@ -6,6 +6,13 @@ from typing import Any, Optional, Tuple
 
 from Infernux.lib import InxMaterial
 
+_VK_BLEND_SRC_ALPHA: int
+_VK_BLEND_ONE_MINUS_SRC_ALPHA: int
+_VK_BLEND_OP_ADD: int
+_RENDER_QUEUE_OPAQUE: int
+_RENDER_QUEUE_TRANSPARENT: int
+_DEFAULT_ALPHA_CLIP_THRESHOLD: float
+
 
 class Material:
     """Pythonic wrapper around C++ InxMaterial."""
