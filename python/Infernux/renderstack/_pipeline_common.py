@@ -163,21 +163,3 @@ def ensure_standard_post_process_points(graph: "RenderGraph") -> None:
         graph.injection_point(BEFORE_POST_PROCESS_POINT, resources=POST_PROCESS_RESOURCES)
     if not graph.has_injection_point(AFTER_POST_PROCESS_POINT):
         graph.injection_point(AFTER_POST_PROCESS_POINT, resources=POST_PROCESS_RESOURCES)
-
-
-def add_post_opaque_section(
-    graph: "RenderGraph",
-    *,
-    enable_screen_ui: bool,
-) -> None:
-    """Shared tail for forward and deferred pipelines.
-
-    Adds: Skybox → after_sky → Transparent → after_transparent
-    → post-process injection points → set_output.
-    """
-    add_skybox_pass(graph)
-    graph.injection_point("after_sky", resources=SCENE_RESOURCES)
-    add_transparent_pass(graph)
-    graph.injection_point("after_transparent", resources=SCENE_RESOURCES)
-    add_standard_post_process_section(graph, enable_screen_ui=enable_screen_ui)
-    graph.set_output(COLOR_TEXTURE)

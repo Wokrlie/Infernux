@@ -57,7 +57,6 @@ from Infernux.renderstack._pipeline_common import (
     GBUFFER_RESOURCES,
     SCENE_RESOURCES,
     SHADOW_MAP_TEXTURE,
-    add_post_opaque_section,
     add_shadow_caster_pass,
     add_skybox_pass,
     add_standard_post_process_section,
@@ -174,5 +173,15 @@ class DefaultDeferredPipeline(RenderPipeline):
 
         graph.injection_point("after_opaque", resources=SCENE_RESOURCES)
 
-        # ---- Passes 3–N: Skybox → Transparent → PostProcess ----
-        add_post_opaque_section(graph, enable_screen_ui=self.enable_screen_ui)
+        # ---- Pass 3: Skybox ----
+        add_skybox_pass(graph)
+        graph.injection_point("after_sky", resources=SCENE_RESOURCES)
+
+        # ---- Pass 4: Transparent objects (forward rendering) ----
+        add_transparent_pass(graph)
+        graph.injection_point("after_transparent", resources=SCENE_RESOURCES)
+
+        # ---- Post-process + ScreenUI injection points ----
+        add_standard_post_process_section(graph, enable_screen_ui=self.enable_screen_ui)
+
+        graph.set_output(COLOR_TEXTURE)
