@@ -1,0 +1,258 @@
+#pragma once
+
+#include <function/editor/EditorPanel.h>
+#include <function/editor/EditorTheme.h>
+
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace infernux
+{
+
+/// Metadata for a single component attached to a GameObject.
+/// Provided by Python callback — avoids C++ iterating py_components.
+struct ComponentInfo
+{
+    std::string typeName;
+    uint64_t componentId = 0;
+    bool enabled = true;
+    bool isNative = true;
+    bool isScript = false;  // Python script (show "(Script)" suffix)
+    bool isBroken = false;  // Script has load errors
+    std::string brokenError;
+};
+
+/// Inspector display mode — mutually exclusive.
+enum class InspectorMode
+{
+    Object,  // GameObject selected from Hierarchy
+    Asset,   // Asset file selected from Project panel
+    Preview, // Non-editable file preview
+};
+
+/// C++ native Inspector panel — Unity-style property/component editor.
+///
+/// Heavy rendering (component headers, Transform, tag/layer, splitter,
+/// object header) happens entirely in C++.  Component body rendering
+/// and Python-dependent operations (undo, script loading, serialize/
+/// deserialize) are reached via std::function callbacks set from the
+/// Python bootstrap layer.
+class InspectorPanel : public EditorPanel
+{
+  public:
+    InspectorPanel();
+
+    // ── Public API (called from Python bootstrap / other panels) ─────
+
+    void SetSelectedObjectId(uint64_t id);
+    void ClearSelectedObject();
+    [[nodiscard]] uint64_t GetSelectedObjectId() const { return m_selectedObjectId; }
+
+    void SetSelectedFile(const std::string &filePath, const std::string &category);
+    void ClearSelectedFile();
+    [[nodiscard]] const std::string &GetSelectedFile() const { return m_selectedFile; }
+
+    void SetDetailFile(const std::string &filePath, const std::string &category);
+
+    // ── Selection callbacks (wrap Python SelectionManager) ───────────
+
+    std::function<bool()> isMultiSelection;
+    std::function<std::vector<uint64_t>()> getSelectedIds;
+
+    // ── Object info callbacks ────────────────────────────────────────
+
+    /// Returns (name, active, tag, layer, prefabGuid, hideTransform)
+    struct ObjectInfo
+    {
+        std::string name;
+        bool active = true;
+        std::string tag;
+        int layer = 0;
+        std::string prefabGuid;
+        bool hideTransform = false;
+    };
+    std::function<ObjectInfo(uint64_t)> getObjectInfo;
+
+    /// Set object property: (objId, propName, newValueStr)
+    std::function<void(uint64_t, const std::string &, const std::string &)> setObjectProperty;
+
+    // ── Transform callbacks ──────────────────────────────────────────
+
+    struct TransformData
+    {
+        float px = 0, py = 0, pz = 0; // local position
+        float rx = 0, ry = 0, rz = 0; // local euler
+        float sx = 1, sy = 1, sz = 1; // local scale
+    };
+    std::function<TransformData(uint64_t)> getTransformData;
+    std::function<void(uint64_t, const TransformData &)> setTransformData;
+
+    // ── Component enumeration callbacks ──────────────────────────────
+
+    /// Get list of all component infos for a single object.
+    std::function<std::vector<ComponentInfo>(uint64_t)> getComponentList;
+    /// Get icon texture ID for a component type.
+    std::function<uint64_t(const std::string &, bool)> getComponentIconId;
+
+    // ── Component body rendering callbacks (Python → ImGui) ─────────
+
+    /// Render a component body (everything under the header).
+    /// Parameters: (ctx, objId, typeName, componentId, isNative)
+    std::function<void(InxGUIContext *, uint64_t, const std::string &, uint64_t, bool)> renderComponentBody;
+
+    /// Render a component right-click context menu.
+    /// Returns true if an action consumed the frame (caller should bail).
+    std::function<bool(InxGUIContext *, uint64_t, const std::string &, uint64_t, bool)> renderComponentContextMenu;
+
+    // ── Component enabled toggle ─────────────────────────────────────
+
+    std::function<void(uint64_t, uint64_t, bool, bool)> setComponentEnabled;
+
+    // ── Add Component callbacks ──────────────────────────────────────
+
+    struct AddComponentEntry
+    {
+        std::string displayName;
+        std::string category;
+        bool isNative = true;
+        std::string scriptPath; // only for scripts
+    };
+    std::function<std::vector<AddComponentEntry>()> getAddComponentEntries;
+    std::function<void(const std::string &, bool, const std::string &)> addComponent; // (typeName/path, isNative, scriptPath)
+
+    // ── Remove Component callback ────────────────────────────────────
+
+    std::function<bool(uint64_t, const std::string &, uint64_t, bool)> removeComponent;
+
+    // ── Asset / File preview callbacks ───────────────────────────────
+
+    /// Render the asset inspector for the given file/category.
+    std::function<void(InxGUIContext *, const std::string &, const std::string &)> renderAssetInspector;
+    /// Render generic file preview.
+    std::function<void(InxGUIContext *, const std::string &)> renderFilePreview;
+
+    // ── Material sections callback ───────────────────────────────────
+
+    /// Render material override sections for an object.
+    std::function<void(InxGUIContext *, uint64_t)> renderMaterialSections;
+
+    // ── Prefab callbacks ─────────────────────────────────────────────
+
+    struct PrefabInfo
+    {
+        int overrideCount = 0;
+        bool isReadonly = false;
+        bool isTransformReadonly = false;
+    };
+    std::function<PrefabInfo(uint64_t)> getPrefabInfo;
+    std::function<void(uint64_t, const std::string &)> prefabAction; // (objId, "select"|"open"|"apply"|"revert")
+
+    // ── Undo callbacks ───────────────────────────────────────────────
+
+    std::function<void()> undoBeginFrame;
+    std::function<void(bool)> undoEndFrame; // (anyItemActive)
+    std::function<void()> undoInvalidateAll;
+
+    // ── Tag & Layer info ─────────────────────────────────────────────
+
+    std::function<std::vector<std::string>()> getAllTags;
+    std::function<std::vector<std::string>()> getAllLayers;
+
+    // ── Translation ──────────────────────────────────────────────────
+
+    std::function<std::string(const std::string &)> translate;
+
+    // ── Script drop on PropertiesModule ──────────────────────────────
+
+    std::function<void(const std::string &)> handleScriptDrop;
+
+    // ── Window manager integration ───────────────────────────────────
+
+    std::function<void(const std::string &)> openWindow;
+
+  protected:
+    void OnRenderContent(InxGUIContext *ctx) override;
+    void PreRender(InxGUIContext *ctx) override;
+
+  private:
+    // ── Translation cache ────────────────────────────────────────────
+    const std::string &Tr(const std::string &key);
+    std::unordered_map<std::string, std::string> m_trCache;
+
+    // ── Mode state ───────────────────────────────────────────────────
+    InspectorMode m_mode = InspectorMode::Object;
+    uint64_t m_selectedObjectId = 0;
+    std::string m_selectedFile;
+    std::string m_assetCategory;
+
+    // ── Splitter state ───────────────────────────────────────────────
+    float m_propertiesRatio = EditorTheme::INSPECTOR_DEFAULT_RATIO;
+
+    // ── Tag/Layer cache ──────────────────────────────────────────────
+    float m_tagLayerCacheTime = 0.0f;
+    std::vector<std::string> m_cachedTags;
+    std::vector<std::string> m_cachedLayers;
+    std::vector<std::string> m_cachedTagItems;   // tags + "Add Tag..."
+    std::vector<std::string> m_cachedLayerItems; // "0: Default" + "Add Layer..."
+    static constexpr float TAG_LAYER_CACHE_TTL = 0.25f;
+
+    // ── Add Component popup state ────────────────────────────────────
+    char m_addCompSearch[256] = {};
+    std::vector<AddComponentEntry> m_addCompEntries;
+    bool m_addCompPopupOpen = false;
+
+    // ── Idle-skip state ──────────────────────────────────────────────
+    int m_idleFrames = 0;
+
+    // ── Timing ───────────────────────────────────────────────────────
+    float m_frameTimeNow = 0.0f;
+
+    // ── Cached object info ───────────────────────────────────────────
+    uint64_t m_cachedObjInfoId = 0;
+    ObjectInfo m_cachedObjInfo;
+    PrefabInfo m_cachedPrefabInfo;
+
+    // ── Render helpers ───────────────────────────────────────────────
+    void RenderPropertiesModule(InxGUIContext *ctx, float height);
+    void RenderRawDataModule(InxGUIContext *ctx, float height);
+    float RenderSplitter(InxGUIContext *ctx, float totalHeight);
+
+    void RenderSingleObject(InxGUIContext *ctx, uint64_t objId);
+    void RenderMultiEdit(InxGUIContext *ctx, const std::vector<uint64_t> &ids);
+
+    void RenderObjectHeader(InxGUIContext *ctx, uint64_t objId, const ObjectInfo &info);
+    void RenderTagLayerRow(InxGUIContext *ctx, uint64_t objId, const ObjectInfo &info);
+    void RenderTransform(InxGUIContext *ctx, uint64_t objId);
+    void RenderPrefabHeader(InxGUIContext *ctx, uint64_t objId, const PrefabInfo &pinfo);
+
+    /// Render one component header (icon + enabled + collapsing).
+    /// Returns (headerOpen, newEnabled).
+    std::pair<bool, bool> RenderComponentHeader(
+        InxGUIContext *ctx, const std::string &typeName,
+        const std::string &headerId, uint64_t iconId,
+        bool showEnabled, bool isEnabled,
+        const std::string &suffix = "", bool defaultOpen = true);
+
+    bool RenderInspectorCheckbox(InxGUIContext *ctx, const char *label, bool value);
+
+    void RenderAddComponentButton(InxGUIContext *ctx);
+    void RenderAddComponentPopup(InxGUIContext *ctx);
+
+    void RefreshTagLayerCache();
+
+    // ── Searchable combo helper ──────────────────────────────────────
+    struct ComboState
+    {
+        char filter[256] = {};
+        bool needsFocus = false;
+    };
+    std::unordered_map<std::string, ComboState> m_comboStates;
+    int SearchableCombo(InxGUIContext *ctx, const char *label, int currentIdx,
+                        const std::vector<std::string> &items, float width = 0.0f);
+};
+
+} // namespace infernux

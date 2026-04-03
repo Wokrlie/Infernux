@@ -318,7 +318,7 @@ class PlayModeManager:
         def on_done(ok):
             from Infernux.engine.ui.engine_status import EngineStatus
             if ok:
-                EngineStatus.flash("已启动 Playing ▶", 1.0, duration=1.5)
+                EngineStatus.flash("已启动 Playing", 1.0, duration=1.5)
             else:
                 EngineStatus.flash("启动失败 Play Failed", 0.0, duration=2.0)
 

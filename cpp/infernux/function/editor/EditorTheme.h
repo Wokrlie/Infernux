@@ -102,7 +102,59 @@ constexpr const char *PREFAB_ICON = "\xe2\x97\x86"; // ◆ U+25C6
 // ── Icons (Unicode glyphs) ───────────────────────────────────────────
 constexpr const char *ICON_WARNING = "\xe2\x96\xb2"; // ▲ U+25B2
 constexpr const char *ICON_ERROR = "\xe2\x97\x8f";   // ● U+25CF
+// ── Inspector panel ──────────────────────────────────────────────
+constexpr ImVec4 TEXT{0.82f, 0.82f, 0.85f, 1.0f};
+constexpr ImVec4 TEXT_DIM2{0.55f, 0.55f, 0.55f, 1.0f};
+constexpr ImVec4 WARNING_TEXT{0.90f, 0.60f, 0.20f, 1.0f};
+constexpr ImVec4 ERROR_TEXT{0.90f, 0.30f, 0.30f, 1.0f};
+constexpr ImVec4 PREFAB_TEXT2{0.922f, 0.341f, 0.341f, 1.0f};
 
+constexpr ImVec4 PREFAB_HEADER_BG{0.235f, 0.235f, 0.235f, 1.0f};
+constexpr float PREFAB_HEADER_H = 28.0f;
+constexpr float PREFAB_HEADER_BTN_GAP = 4.0f;
+
+constexpr ImVec2 INSPECTOR_INIT_SIZE{300.0f, 500.0f};
+constexpr float INSPECTOR_MIN_PROPS_H = 100.0f;
+constexpr float INSPECTOR_MIN_RAWDATA_H = 100.0f;
+constexpr float INSPECTOR_SPLITTER_H = 8.0f;
+constexpr float INSPECTOR_DEFAULT_RATIO = 0.4f;
+constexpr float INSPECTOR_LABEL_PAD = 18.0f;
+constexpr float INSPECTOR_MIN_LABEL_WIDTH = 156.0f;
+constexpr ImVec2 INSPECTOR_FRAME_PAD{4.0f, 2.0f};
+constexpr ImVec2 INSPECTOR_ITEM_SPC{4.0f, 2.0f};
+constexpr float INSPECTOR_SECTION_GAP = 6.0f;
+constexpr float INSPECTOR_TITLE_GAP = 10.0f;
+constexpr float INSPECTOR_ACTION_ALIGN_X = 0.0f;
+constexpr float INSPECTOR_HEADER_CONTENT_INDENT = 28.0f;
+constexpr float COMPONENT_ICON_SIZE = 16.0f;
+
+constexpr ImVec2 INSPECTOR_HEADER_PRIMARY_FRAME_PAD{4.0f, 2.0f};
+constexpr ImVec2 INSPECTOR_HEADER_SECONDARY_FRAME_PAD{4.0f, 2.0f};
+constexpr ImVec2 INSPECTOR_HEADER_ITEM_SPC{4.0f, 2.0f};
+constexpr float INSPECTOR_HEADER_BORDER_SIZE = 0.0f;
+constexpr float INSPECTOR_HEADER_PRIMARY_FONT_SCALE = 1.0f;
+constexpr float INSPECTOR_HEADER_SECONDARY_FONT_SCALE = 1.0f;
+
+constexpr ImVec4 INSPECTOR_HEADER_PRIMARY{0.235f, 0.235f, 0.235f, 1.0f};
+constexpr ImVec4 INSPECTOR_HEADER_PRIMARY_HOVERED{0.28f, 0.24f, 0.24f, 1.0f};
+constexpr ImVec4 INSPECTOR_HEADER_PRIMARY_ACTIVE{0.32f, 0.25f, 0.25f, 1.0f};
+constexpr ImVec4 INSPECTOR_HEADER_SECONDARY{0.20f, 0.20f, 0.20f, 1.0f};
+constexpr ImVec4 INSPECTOR_HEADER_SECONDARY_HOVERED{0.25f, 0.22f, 0.22f, 1.0f};
+constexpr ImVec4 INSPECTOR_HEADER_SECONDARY_ACTIVE{0.28f, 0.24f, 0.24f, 1.0f};
+
+constexpr ImVec2 INSPECTOR_CHECKBOX_FRAME_PAD{4.0f, 2.0f};
+constexpr float INSPECTOR_CHECKBOX_FONT_SCALE = 1.0f;
+constexpr float INSPECTOR_CHECKBOX_SLOT_W = 22.0f;
+
+constexpr ImVec4 INSPECTOR_INLINE_BTN_IDLE{0.20f, 0.20f, 0.20f, 1.0f};
+constexpr ImVec4 INSPECTOR_INLINE_BTN_HOVER{0.28f, 0.24f, 0.24f, 1.0f};
+constexpr ImVec4 INSPECTOR_INLINE_BTN_ACTIVE{0.922f, 0.341f, 0.341f, 1.0f};
+constexpr float INSPECTOR_INLINE_BTN_GAP = 4.0f;
+
+constexpr float ADD_COMP_SEARCH_W = 240.0f;
+constexpr ImVec2 POPUP_ADD_COMP_PAD{10.0f, 8.0f};
+constexpr ImVec2 POPUP_ADD_COMP_SPC{6.0f, 4.0f};
+constexpr ImVec2 ADD_COMP_FRAME_PAD{6.0f, 6.0f};
 // ── Helper: push flat-color button style (3 colors) ─────────────────
 inline void PushFlatButtonStyle(const ImVec4 &base)
 {

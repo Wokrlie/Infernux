@@ -86,8 +86,6 @@ class PlayerBootstrap:
         self._load_initial_scene()
         self._enter_play_mode()
 
-    # ── Phase 1: JIT pre-compilation ───────────────────────────────────
-
     @staticmethod
     def _precompile_jit():
         try:
@@ -96,7 +94,6 @@ class PlayerBootstrap:
         except ImportError:
             pass
 
-    # ── Phase 2: Engine initialization ─────────────────────────────────
 
     def _init_engine(self):
         self.engine = Engine(self.engine_log_level)
@@ -114,14 +111,12 @@ class PlayerBootstrap:
         )
         self.engine.set_gui_font(_resources.engine_font_path, 15)
 
-    # ── Phase 3: Tag/layer settings ────────────────────────────────────
 
     def _load_tag_layer_settings(self):
         path = os.path.join(self.project_path, "ProjectSettings", "TagLayerSettings.json")
         if os.path.isfile(path):
             TagLayerManager.instance().load_from_file(_safe_path(path))
 
-    # ── Phase 4: Create managers ───────────────────────────────────────
 
     def _create_managers(self):
         self.scene_file_manager = SceneFileManager()
@@ -133,12 +128,10 @@ class PlayerBootstrap:
         if pm:
             pm.set_asset_database(self.engine.get_asset_database())
 
-    # ── Phase 5: Enable game camera ────────────────────────────────────
 
     def _setup_game_camera(self):
         self.engine.set_game_camera_enabled(True)
 
-    # ── Phase 6: Register player GUI ───────────────────────────────────
 
     def _register_player_gui(self):
         self._player_gui = PlayerGUI(
@@ -147,8 +140,6 @@ class PlayerBootstrap:
             data_root=self.project_path,
         )
         self.engine.register_gui("player_gui", self._player_gui)
-
-    # ── Phase 7: Load initial scene ────────────────────────────────────
 
     def _load_initial_scene(self):
         import json as _json
@@ -180,8 +171,6 @@ class PlayerBootstrap:
         if self.scene_file_manager:
             self.scene_file_manager._do_open_scene(first_scene)
             Debug.log_internal(f"Loaded initial scene: {os.path.basename(first_scene)}")
-
-    # ── Phase 8: Enter play mode ───────────────────────────────────────
 
     def _enter_play_mode(self):
         """Enter play mode immediately (no deferred task, no save guard)."""

@@ -1463,6 +1463,16 @@ void HierarchyPanel::OnRenderContent(InxGUIContext *ctx)
             ctx->PopStyleColor(1);
         }
 
+        // Fallback: deselect when clicking the scrollable background
+        // (the tail InvisibleButton only works when remainingH > 4)
+        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)
+            && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
+            && !ImGui::IsAnyItemHovered())
+        {
+            CancelRename();
+            ClearSelectionAndNotify();
+        }
+
         ctx->PopStyleVar(3); // IndentSpacing + FramePadding + ItemSpacing
 
         if (HasActiveSearch() && nRoots == 0)

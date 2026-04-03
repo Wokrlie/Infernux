@@ -21,7 +21,6 @@ from Infernux.engine.play_mode import PlayModeManager, PlayModeState
 from Infernux.engine.scene_manager import SceneFileManager
 from Infernux.engine.ui import (
     FrameSchedulerPanel,
-    InspectorPanel,
     SceneViewPanel,
     GameViewPanel,
     WindowManager,
@@ -77,7 +76,7 @@ class EditorBootstrap:
         self.menu_bar = None
         self.toolbar = None
         self.hierarchy = None
-        self.inspector_panel: Optional[InspectorPanel] = None
+        self.inspector_panel = None  # C++ InspectorPanel (native)
         self.project_panel = None
         self.console = None  # C++ ConsolePanel (native)
         self.status_bar = None
@@ -134,14 +133,12 @@ class EditorBootstrap:
         self._phase += 1
         _signal_progress(self._phase, _TOTAL_PHASES, message)
 
-    # ── Phase 1: JIT pre-compilation ───────────────────────────────────
 
     @staticmethod
     def _precompile_jit():
         from Infernux._jit_kernels import precompile as _jit_precompile
         _jit_precompile()
 
-    # ── Phase 2: Engine initialization ─────────────────────────────────
 
     def _init_engine(self):
         self.engine = Engine(self.engine_log_level)
@@ -150,14 +147,10 @@ class EditorBootstrap:
         )
         self.engine.set_gui_font(_resources.engine_font_path, 15)
 
-    # ── Phase 3: Tag/layer settings ────────────────────────────────────
-
     def _load_tag_layer_settings(self):
         path = os.path.join(self.project_path, "ProjectSettings", "TagLayerSettings.json")
         if os.path.isfile(path):
             TagLayerManager.instance().load_from_file(path)
-
-    # ── Phase 4: Create managers ───────────────────────────────────────
 
     def _create_managers(self):
         from Infernux.engine.undo import UndoManager
@@ -212,7 +205,6 @@ class EditorBootstrap:
         from Infernux.components.serialized_field import set_field_change_hooks
         set_field_change_hooks(will_change=will_change, did_change=did_change)
 
-    # ── Phase 5: Register window types ─────────────────────────────────
 
     def _register_window_types(self):
         """Register all @editor_panel-decorated panels with WindowManager.
@@ -228,7 +220,7 @@ class EditorBootstrap:
         # Override factories for panels that need runtime dependencies.
         # Panels with no-arg constructors use the default factory (cls()).
         _factories = {
-            "inspector":          lambda: InspectorPanel(engine=engine),
+            "inspector":          lambda: self._create_native_inspector(),
             "scene_view":         lambda: SceneViewPanel(engine=engine),
             "game_view":          lambda: GameViewPanel(engine=engine),
             "project":            lambda: self._create_native_project_panel(),
@@ -247,6 +239,16 @@ class EditorBootstrap:
         panel = TagLayerSettingsPanel()
         panel.set_project_path(self.project_path)
         return panel
+
+    def _create_native_inspector(self):
+        """Create a fresh C++ InspectorPanel with all callbacks wired."""
+        from Infernux.lib import InspectorPanel as NativeInspectorPanel
+        ip = NativeInspectorPanel()
+        old = self.inspector_panel
+        self.inspector_panel = ip
+        self._wire_inspector_callbacks()
+        self.inspector_panel = old
+        return ip
 
     def _create_native_project_panel(self):
         """Create a fresh C++ ProjectPanel with all callbacks wired."""
@@ -359,7 +361,6 @@ class EditorBootstrap:
         tb.sync_camera_from_engine = _sync_camera
         tb.apply_camera_to_engine = _apply_camera
 
-    # ── Phase 6: Create and register panels ────────────────────────────
 
     def _create_panels(self):
         engine = self.engine
@@ -398,9 +399,10 @@ class EditorBootstrap:
         engine.register_gui("hierarchy", self.hierarchy)
         wm.register_existing_window("hierarchy", self.hierarchy, "hierarchy")
 
-        # Inspector
-        self.inspector_panel = InspectorPanel(engine=engine)
-        self.inspector_panel.set_window_manager(wm)
+        # Inspector (C++ native panel — replaces Python InspectorPanel)
+        from Infernux.lib import InspectorPanel as NativeInspectorPanel
+        self.inspector_panel = NativeInspectorPanel()
+        self._wire_inspector_callbacks()
         engine.register_gui("inspector", self.inspector_panel)
         wm.register_existing_window("inspector", self.inspector_panel, "inspector")
 
@@ -1242,8 +1244,6 @@ class EditorBootstrap:
 
         hp.delete_selected_objects = _delete_selected_objects
 
-    # ── Phase 5: Wire Project Panel callbacks ──────────────────────────
-
     def _wire_project_callbacks(self):
         """Wire C++ ProjectPanel callbacks to Python managers."""
         pp = self.project_panel
@@ -1431,7 +1431,630 @@ class EditorBootstrap:
 
         pp.invalidate_asset_inspector = _invalidate_asset_inspector
 
-    # ── Phase 7: Wire selection system ─────────────────────────────────
+    def _wire_inspector_callbacks(self):
+        """Wire C++ InspectorPanel callbacks to Python managers."""
+        ip = self.inspector_panel
+        engine = self.engine
+        from Infernux.engine.i18n import t as _t
+
+        # ── Translation ────────────────────────────────────────────────
+        ip.translate = _t
+
+        # ── Selection ──────────────────────────────────────────────────
+        from Infernux.engine.ui.selection_manager import SelectionManager
+
+        ip.is_multi_selection = lambda: SelectionManager.instance().is_multi()
+        ip.get_selected_ids = lambda: SelectionManager.instance().get_ids()
+
+        # ── Object info ────────────────────────────────────────────────
+        from Infernux.lib import SceneManager, InspectorObjectInfo
+
+        def _get_object_info(obj_id):
+            info = InspectorObjectInfo()
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(obj_id) if scene else None
+            if obj is None:
+                return info
+            info.name = obj.name
+            info.active = obj.active
+            info.tag = getattr(obj, 'tag', 'Untagged')
+            info.layer = getattr(obj, 'layer', 0)
+            info.prefab_guid = getattr(obj, 'prefab_guid', '') or ''
+            info.hide_transform = getattr(obj, 'hide_transform', False)
+            return info
+
+        ip.get_object_info = _get_object_info
+
+        def _set_object_property(obj_id, prop_name, value_str):
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(obj_id) if scene else None
+            if obj is None:
+                return
+            from Infernux.engine.undo import UndoManager, SetPropertyCommand
+            mgr = UndoManager.instance()
+            old_val = getattr(obj, prop_name, None)
+            if prop_name == "active":
+                new_val = value_str.lower() in ("true", "1")
+            elif prop_name == "name":
+                new_val = value_str
+            elif prop_name == "tag":
+                new_val = value_str
+            elif prop_name == "layer":
+                new_val = int(value_str)
+            else:
+                new_val = value_str
+            if mgr:
+                mgr.execute(SetPropertyCommand(obj, prop_name, old_val, new_val,
+                                            f"Set {prop_name}"))
+            else:
+                setattr(obj, prop_name, new_val)
+
+        ip.set_object_property = _set_object_property
+
+        # ── Transform ──────────────────────────────────────────────────
+        from Infernux.lib import InspectorTransformData
+
+        def _get_transform_data(obj_id):
+            td = InspectorTransformData()
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(obj_id) if scene else None
+            if obj is None:
+                return td
+            trans = obj.get_transform()
+            if trans is None:
+                return td
+            lp = trans.local_position
+            le = trans.local_euler_angles
+            ls = trans.local_scale
+            td.px, td.py_, td.pz = lp.x, lp.y, lp.z
+            td.rx, td.ry, td.rz = le.x, le.y, le.z
+            td.sx, td.sy, td.sz = ls.x, ls.y, ls.z
+            return td
+
+        ip.get_transform_data = _get_transform_data
+
+        def _set_transform_data(obj_id, td):
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(obj_id) if scene else None
+            if obj is None:
+                return
+            trans = obj.get_transform()
+            if trans is None:
+                return
+            from Infernux.lib import Vector3
+            trans.local_position = Vector3(td.px, td.py_, td.pz)
+            trans.local_euler_angles = Vector3(td.rx, td.ry, td.rz)
+            trans.local_scale = Vector3(td.sx, td.sy, td.sz)
+
+        ip.set_transform_data = _set_transform_data
+
+        # ── Component enumeration ──────────────────────────────────────
+        from Infernux.lib import InspectorComponentInfo
+        from Infernux.components.component import InxComponent
+
+        def _is_python_component_entry(component) -> bool:
+            return isinstance(component, InxComponent) or hasattr(component, 'get_py_component')
+
+        def _get_component_list(obj_id):
+            result = []
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(obj_id) if scene else None
+            if obj is None:
+                return result
+            # C++ components (skip Python components and Transform)
+            for comp in (obj.get_components() or []):
+                if _is_python_component_entry(comp):
+                    continue
+                comp_type_name = getattr(comp, 'type_name', type(comp).__name__)
+                if comp_type_name == "Transform":
+                    continue  # rendered separately by the C++ shell
+                ci = InspectorComponentInfo()
+                ci.type_name = comp_type_name
+                ci.component_id = getattr(comp, 'component_id', id(comp))
+                ci.enabled = bool(getattr(comp, 'enabled', True))
+                ci.is_native = True
+                ci.is_script = False
+                ci.is_broken = False
+                result.append(ci)
+            # Python components
+            for py_comp in (obj.get_py_components() or []):
+                ci = InspectorComponentInfo()
+                ci.type_name = getattr(py_comp, 'type_name', type(py_comp).__name__)
+                ci.component_id = getattr(py_comp, 'component_id', id(py_comp))
+                ci.enabled = bool(getattr(py_comp, 'enabled', True))
+                ci.is_native = False
+                ci.is_script = True
+                _is_broken = getattr(py_comp, '_is_broken', False)
+                ci.is_broken = bool(_is_broken)
+                if ci.is_broken:
+                    ci.broken_error = getattr(py_comp, '_broken_error', '') or ''
+                result.append(ci)
+            return result
+
+        ip.get_component_list = _get_component_list
+
+        # ── Component icons ────────────────────────────────────────────
+        # Lazy-init icon cache from InspectorPanel Python class
+        _icon_cache = {}
+        _icons_loaded = [False]
+
+        def _ensure_icons():
+            if _icons_loaded[0]:
+                return
+            _icons_loaded[0] = True
+            native_engine = engine.get_native_engine()
+            if not native_engine:
+                return
+            import os
+            import Infernux.resources as _resources
+            from Infernux.lib import TextureLoader
+            icons_dir = _resources.component_icons_dir
+            if not os.path.isdir(icons_dir):
+                return
+            for fname in os.listdir(icons_dir):
+                if not fname.startswith("component_") or not fname.endswith(".png"):
+                    continue
+                key = fname[len("component_"):-len(".png")]
+                tex_name = f"__compicon__{key}"
+                if native_engine.has_imgui_texture(tex_name):
+                    _icon_cache[key] = native_engine.get_imgui_texture_id(tex_name)
+                    continue
+                icon_path = os.path.join(icons_dir, fname)
+                tex_data = TextureLoader.load_from_file(icon_path)
+                if tex_data and tex_data.is_valid():
+                    from Infernux.engine.ui.inspector_panel import _prepare_component_icon_pixels
+                    pixels, w, h = _prepare_component_icon_pixels(tex_data)
+                    if w > 0 and h > 0:
+                        tid = native_engine.upload_texture_for_imgui(tex_name, pixels, w, h)
+                        if tid != 0:
+                            _icon_cache[key] = tid
+
+        def _get_component_icon_id(type_name, is_script):
+            _ensure_icons()
+            tid = _icon_cache.get(type_name.lower(), 0)
+            if tid == 0 and is_script:
+                tid = _icon_cache.get("script", 0)
+            return tid
+
+        ip.get_component_icon_id = _get_component_icon_id
+
+        # ── Component body rendering ───────────────────────────────────
+        from Infernux.engine.ui import inspector_components as comp_ui
+
+        def _render_component_body(ctx, obj_id, type_name, comp_id, is_native):
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(obj_id) if scene else None
+            if obj is None:
+                return
+            if is_native:
+                for comp in (obj.get_components() or []):
+                    cid = getattr(comp, 'component_id', id(comp))
+                    if cid == comp_id:
+                        comp_ui.render_component(ctx, comp)
+                        return
+            else:
+                for py_comp in (obj.get_py_components() or []):
+                    cid = getattr(py_comp, 'component_id', id(py_comp))
+                    if cid == comp_id:
+                        # Check for broken script
+                        _script_err = None
+                        if getattr(py_comp, '_is_broken', False):
+                            _script_err = getattr(py_comp, '_broken_error', '') or 'Script failed to load'
+                        else:
+                            _py_guid = getattr(py_comp, '_script_guid', None)
+                            adb = engine.get_asset_database()
+                            if _py_guid and adb:
+                                from Infernux.components.script_loader import get_script_error_by_path
+                                _py_path = adb.get_path_from_guid(_py_guid)
+                                if _py_path:
+                                    _script_err = get_script_error_by_path(_py_path)
+                        if _script_err:
+                            from Infernux.engine.ui.theme import Theme, ImGuiCol
+                            ctx.push_style_color(ImGuiCol.Text, *Theme.ERROR_TEXT)
+                            ctx.text_wrapped(_script_err)
+                            ctx.pop_style_color(1)
+                        else:
+                            from Infernux.engine.ui.inspector_components import render_py_component
+                            render_py_component(ctx, py_comp)
+                        return
+
+        ip.render_component_body = _render_component_body
+
+        # ── Component context menu ─────────────────────────────────────
+        # We create a lightweight Python-side context menu manager since
+        # the C++ panel calls this callback after rendering the header.
+        _ctx_menu_state = {"right_click_enabled": True}
+
+        def _can_remove_component(obj, comp, type_name, is_native):
+            if is_native:
+                blockers = []
+                if hasattr(obj, 'get_remove_component_blockers'):
+                    try:
+                        blockers = list(obj.get_remove_component_blockers(comp) or [])
+                    except RuntimeError:
+                        blockers = []
+                can_remove = not blockers
+                if can_remove and hasattr(obj, 'can_remove_component'):
+                    can_remove = bool(obj.can_remove_component(comp))
+                if not can_remove:
+                    from Infernux.debug import Debug
+                    suffix = (
+                        f" required by: {', '.join(blockers)}"
+                        if blockers else
+                        "another component depends on it"
+                    )
+                    Debug.log_warning(f"Cannot remove '{type_name}' — {suffix}")
+                    return False
+            return True
+
+        def _render_component_context_menu(ctx, obj_id, type_name, comp_id, is_native):
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(obj_id) if scene else None
+            if obj is None:
+                return False
+            comp = None
+            if is_native:
+                for c in (obj.get_components() or []):
+                    if getattr(c, 'component_id', id(c)) == comp_id:
+                        comp = c
+                        break
+            else:
+                for c in (obj.get_py_components() or []):
+                    if getattr(c, 'component_id', id(c)) == comp_id:
+                        comp = c
+                        break
+            if comp is None:
+                return False
+            popup_id = "comp_ctx" if is_native else "py_comp_ctx"
+            if not ctx.begin_popup_context_item(popup_id):
+                return False
+            # Copy
+            if ctx.selectable(_t("inspector.copy_properties")):
+                pass  # TODO: integrate clipboard
+            ctx.separator()
+            # Remove
+            if ctx.selectable(_t("inspector.remove")):
+                if not _can_remove_component(obj, comp, type_name, is_native):
+                    ctx.end_popup()
+                    return False
+                if is_native:
+                    from Infernux.engine.undo import UndoManager, RemoveNativeComponentCommand
+                    mgr = UndoManager.instance()
+                    if mgr:
+                        mgr.execute(RemoveNativeComponentCommand(obj.id, type_name, comp))
+                    elif obj.remove_component(comp) is False:
+                        ctx.end_popup()
+                        return False
+                else:
+                    from Infernux.engine.undo import UndoManager, RemovePyComponentCommand
+                    mgr = UndoManager.instance()
+                    if mgr:
+                        mgr.execute(RemovePyComponentCommand(obj.id, comp))
+                    elif obj.remove_py_component(comp) is False:
+                        ctx.end_popup()
+                        return False
+                ctx.end_popup()
+                return True
+            ctx.end_popup()
+            return False
+
+        ip.render_component_context_menu = _render_component_context_menu
+
+        # ── Component enabled toggle ───────────────────────────────────
+        def _set_component_enabled(obj_id, comp_id, new_enabled, is_native):
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(obj_id) if scene else None
+            if obj is None:
+                return
+            comps = obj.get_components() if is_native else obj.get_py_components()
+            for comp in (comps or []):
+                if getattr(comp, 'component_id', id(comp)) == comp_id:
+                    from Infernux.engine.undo import UndoManager, SetPropertyCommand
+                    mgr = UndoManager.instance()
+                    old_val = comp.enabled
+                    if mgr:
+                        mgr.execute(SetPropertyCommand(
+                            comp, "enabled", old_val, new_enabled,
+                            f"Toggle {getattr(comp, 'type_name', '?')}"))
+                    else:
+                        comp.enabled = new_enabled
+                    return
+
+        ip.set_component_enabled = _set_component_enabled
+
+        # ── Add Component ──────────────────────────────────────────────
+        from Infernux.lib import InspectorAddComponentEntry
+
+        def _get_add_component_entries():
+            entries = []
+            # Native component types (from C++ registry)
+            from Infernux.lib import get_registered_component_types
+            for type_name in sorted(get_registered_component_types()):
+                if type_name == "Transform":
+                    continue
+                e = InspectorAddComponentEntry()
+                e.display_name = type_name
+                e.category = "Built-in"
+                e.is_native = True
+                entries.append(e)
+            # Engine-level Python components (e.g. RenderStack)
+            from Infernux.renderstack.render_stack import RenderStack
+            for display_name, comp_cls in [("RenderStack", RenderStack)]:
+                e = InspectorAddComponentEntry()
+                e.display_name = display_name
+                e.category = "Engine"
+                e.is_native = False
+                e.script_path = ""
+                entries.append(e)
+            # User script components (scan project folder)
+            import os
+            from Infernux.engine.project_context import get_project_root
+            from Infernux.components.script_loader import load_component_from_file, ScriptLoadError
+            project_root = get_project_root()
+            if project_root and os.path.isdir(project_root):
+                for dirpath, _dirnames, filenames in os.walk(project_root):
+                    rel = os.path.relpath(dirpath, project_root)
+                    if any(part.startswith('.') or part in (
+                            '__pycache__', 'build', 'Library',
+                            'ProjectSettings', 'Logs', 'Temp')
+                           for part in rel.split(os.sep)):
+                        continue
+                    for fn in filenames:
+                        if not fn.endswith('.py') or fn.startswith('_'):
+                            continue
+                        full = os.path.join(dirpath, fn)
+                        with open(full, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read(4096)
+                        if 'InxComponent' not in content:
+                            continue
+                        try:
+                            comp_class = load_component_from_file(full)
+                        except (ScriptLoadError, Exception):
+                            continue
+                        e = InspectorAddComponentEntry()
+                        e.display_name = comp_class.__name__
+                        e.category = "Scripts"
+                        e.is_native = False
+                        e.script_path = full
+                        entries.append(e)
+            return entries
+
+        ip.get_add_component_entries = _get_add_component_entries
+
+        def _add_component(type_name_or_path, is_native, script_path):
+            sel = SelectionManager.instance()
+            primary = sel.get_primary()
+            if not primary:
+                return
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(primary) if scene else None
+            if obj is None:
+                return
+            from Infernux.engine.ui.inspector_components import (
+                _record_add_component_compound, _get_component_ids
+            )
+            from Infernux.debug import Debug
+            if is_native:
+                before_ids = _get_component_ids(obj)
+                result = obj.add_component(type_name_or_path)
+                if result is not None:
+                    Debug.log_internal(f"Added component: {type_name_or_path}")
+                    _record_add_component_compound(
+                        obj, type_name_or_path, result, before_ids, is_py=False)
+                else:
+                    Debug.log_error(f"Failed to add component: {type_name_or_path}")
+            else:
+                # Engine-level Python component (no script_path) vs user script
+                if not script_path:
+                    # Engine Python component — look up by display_name
+                    _engine_py_map = {"RenderStack": None}
+                    try:
+                        from Infernux.renderstack.render_stack import RenderStack as _RS
+                        _engine_py_map["RenderStack"] = _RS
+                    except ImportError:
+                        pass
+                    comp_cls = _engine_py_map.get(type_name_or_path)
+                    if comp_cls is None:
+                        Debug.log_error(f"Unknown engine component: {type_name_or_path}")
+                        return
+                    # Enforce @disallow_multiple
+                    if getattr(comp_cls, '_disallow_multiple_', False):
+                        for pc in (obj.get_py_components() or []):
+                            if isinstance(pc, comp_cls):
+                                Debug.log_warning(
+                                    f"Cannot add another '{comp_cls.__name__}' — "
+                                    f"only one per scene is allowed")
+                                return
+                    instance = comp_cls()
+                    before_ids = _get_component_ids(obj)
+                    obj.add_py_component(instance)
+                    _record_add_component_compound(
+                        obj, comp_cls.__name__, instance, before_ids, is_py=True)
+                    Debug.log_internal(f"Added component {comp_cls.__name__}")
+                else:
+                    from Infernux.components import load_and_create_component
+                    try:
+                        component_instance = load_and_create_component(script_path)
+                    except Exception as exc:
+                        Debug.log_error(f"Failed to load script '{script_path}': {exc}")
+                        return
+                    if component_instance is None:
+                        Debug.log_error(f"No InxComponent found in '{script_path}'")
+                        return
+                    before_ids = _get_component_ids(obj)
+                    obj.add_py_component(component_instance)
+                    _record_add_component_compound(
+                        obj, component_instance.type_name,
+                        component_instance, before_ids, is_py=True)
+                    Debug.log_internal(f"Added component {component_instance.type_name}")
+
+        ip.add_component = _add_component
+
+        # ── Remove Component ───────────────────────────────────────────
+        def _remove_component(obj_id, type_name, comp_id, is_native):
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(obj_id) if scene else None
+            if obj is None:
+                return False
+            comps = obj.get_components() if is_native else obj.get_py_components()
+            for comp in (comps or []):
+                if getattr(comp, 'component_id', id(comp)) == comp_id:
+                    if not _can_remove_component(obj, comp, type_name, is_native):
+                        return False
+                    from Infernux.engine.undo import UndoManager
+                    mgr = UndoManager.instance()
+                    if is_native:
+                        from Infernux.engine.undo import RemoveNativeComponentCommand
+                        if mgr:
+                            mgr.execute(RemoveNativeComponentCommand(obj.id, type_name, comp))
+                            return True
+                        return obj.remove_component(comp) is not False
+                    else:
+                        from Infernux.engine.undo import RemovePyComponentCommand
+                        if mgr:
+                            mgr.execute(RemovePyComponentCommand(obj.id, comp))
+                            return True
+                        return obj.remove_py_component(comp) is not False
+            return False
+
+        ip.remove_component = _remove_component
+
+        # ── Asset / File preview ───────────────────────────────────────
+        def _render_asset_inspector(ctx, file_path, category):
+            from Infernux.engine.ui.asset_inspector import render_asset_inspector
+            try:
+                render_asset_inspector(ctx, ip, file_path, category)
+            except Exception as exc:
+                from Infernux.debug import Debug
+                Debug.log_error(f"Asset inspector render failed for '{file_path}': {exc}")
+
+        ip.render_asset_inspector = _render_asset_inspector
+
+        def _render_file_preview(ctx, file_path):
+            import os
+            if os.path.isdir(file_path):
+                ctx.label(_t("inspector.folder_label").format(name=os.path.basename(file_path)))
+                ctx.separator()
+                ctx.label(_t("inspector.path_label").format(path=file_path))
+            else:
+                ctx.label(_t("inspector.file_label").format(name=os.path.basename(file_path)))
+                ctx.separator()
+                ctx.label(_t("inspector.no_previewer"))
+
+        ip.render_file_preview = _render_file_preview
+
+        # ── Material sections ──────────────────────────────────────────
+        def _render_material_sections(ctx, obj_id):
+            # Material sections are rendered by the Python inspector for
+            # MeshRenderer materials inline editing.  For now, delegate
+            # to the component body rendering — the C++ shell calls
+            # renderMaterialSections after all components are done.
+            pass
+
+        ip.render_material_sections = _render_material_sections
+
+        # ── Prefab ─────────────────────────────────────────────────────
+        from Infernux.lib import InspectorPrefabInfo
+
+        def _get_prefab_info(obj_id):
+            pinfo = InspectorPrefabInfo()
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(obj_id) if scene else None
+            if obj is None:
+                return pinfo
+            guid = getattr(obj, 'prefab_guid', '') or ''
+            if not guid:
+                return pinfo
+            from Infernux.engine.scene_manager import SceneFileManager
+            sfm = SceneFileManager.instance()
+            if sfm and not sfm.is_prefab_mode:
+                pinfo.is_readonly = True
+                pinfo.is_transform_readonly = True
+            return pinfo
+
+        ip.get_prefab_info = _get_prefab_info
+
+        def _prefab_action(obj_id, action):
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(obj_id) if scene else None
+            if obj is None:
+                return
+            guid = getattr(obj, 'prefab_guid', '') or ''
+            if not guid:
+                return
+            adb = engine.get_asset_database()
+            if action == "select":
+                if adb:
+                    path = adb.get_path_from_guid(guid)
+                    if path:
+                        self.project_panel.set_current_path(
+                            __import__('os').path.dirname(path))
+            elif action == "open":
+                from Infernux.engine.scene_manager import SceneFileManager
+                sfm = SceneFileManager.instance()
+                if sfm and adb:
+                    path = adb.get_path_from_guid(guid)
+                    if path:
+                        sfm.open_prefab(path)
+            elif action == "apply":
+                from Infernux.engine.prefab import apply_prefab_overrides
+                apply_prefab_overrides(obj)
+            elif action == "revert":
+                from Infernux.engine.prefab import revert_prefab_overrides
+                revert_prefab_overrides(obj)
+
+        ip.prefab_action = _prefab_action
+
+        # ── Undo ───────────────────────────────────────────────────────
+        from Infernux.engine.undo import InspectorUndoTracker
+        _undo_tracker = InspectorUndoTracker()
+
+        ip.undo_begin_frame = _undo_tracker.begin_frame
+        ip.undo_end_frame = _undo_tracker.end_frame
+        ip.undo_invalidate_all = _undo_tracker.invalidate_all
+
+        # ── Tags & Layers ──────────────────────────────────────────────
+        from Infernux.lib import TagLayerManager
+
+        ip.get_all_tags = lambda: TagLayerManager.instance().get_all_tags()
+        ip.get_all_layers = lambda: TagLayerManager.instance().get_all_layers()
+
+        # ── Script drop ────────────────────────────────────────────────
+        def _handle_script_drop(script_path):
+            sel = SelectionManager.instance()
+            primary = sel.get_primary()
+            if not primary:
+                return
+            scene = SceneManager.instance().get_active_scene()
+            obj = scene.find_by_id(primary) if scene else None
+            if obj is None:
+                return
+            from Infernux.engine.undo import UndoManager, AddPyComponentCommand
+            mgr = UndoManager.instance()
+            if mgr:
+                mgr.execute(AddPyComponentCommand(obj.id, script_path))
+
+        ip.handle_script_drop = _handle_script_drop
+
+        # ── Window manager ─────────────────────────────────────────────
+        wm = self.window_manager
+
+        def _open_window(win_id):
+            if wm:
+                wm.open_window(win_id)
+
+        ip.open_window = _open_window
+
+    def _inspector_set_selected_file(self, path):
+        """Compute asset category and call C++ SetSelectedFile."""
+        if path:
+            import os
+            from Infernux.core.asset_types import asset_category_from_extension
+            ext = os.path.splitext(path)[1].lower()
+            cat = asset_category_from_extension(ext) or ""
+            self.inspector_panel.set_selected_file(path, cat)
+        else:
+            self.inspector_panel.clear_selected_file()
 
     def _wire_selection_system(self):
         hierarchy = self.hierarchy
@@ -1497,14 +2120,14 @@ class EditorBootstrap:
             scene = SceneManager.instance().get_active_scene()
             obj = scene.find_by_id(primary_id) if scene else None
 
-        self.inspector_panel.set_selected_object(obj)
-        if obj is not None:
+        self.inspector_panel.set_selected_object_id(primary_id or 0)
+        if primary_id:
             self.project_panel.clear_selection()
         self._set_outline(primary_id)
         self.event_bus.emit(EditorEvent.SELECTION_CHANGED, obj)
 
     def _on_project_selected(self, path):
-        self.inspector_panel.set_selected_file(path)
+        self._inspector_set_selected_file(path)
         if path:
             self.hierarchy.clear_selection_and_notify()
         self.event_bus.emit(EditorEvent.FILE_SELECTED, path)
@@ -1536,7 +2159,7 @@ class EditorBootstrap:
             from Infernux.lib import SceneManager
             scene = SceneManager.instance().get_active_scene()
             obj = scene.find_by_id(primary) if scene else None
-            self.inspector_panel.set_selected_object(obj)
+            self.inspector_panel.set_selected_object_id(primary)
             self.project_panel.clear_selection()
             # Expand hierarchy to reveal the picked object
             if obj:
@@ -1544,7 +2167,7 @@ class EditorBootstrap:
             self.event_bus.emit(EditorEvent.SELECTION_CHANGED, obj)
         else:
             self.project_panel.clear_selection()
-            self.inspector_panel.set_selected_object(None)
+            self.inspector_panel.set_selected_object_id(0)
             self.event_bus.emit(EditorEvent.SELECTION_CHANGED, None)
 
     def _on_box_select_done(self, primary_obj):
@@ -1553,7 +2176,7 @@ class EditorBootstrap:
         new_ids = sel.get_ids()
         self._record_selection_change(new_ids)
 
-        self.inspector_panel.set_selected_object(primary_obj)
+        self.inspector_panel.set_selected_object_id(primary_obj.id if primary_obj else 0)
         if primary_obj:
             self.project_panel.clear_selection()
             self.hierarchy.expand_to_object(primary_obj.id)
@@ -1583,7 +2206,7 @@ class EditorBootstrap:
         self.hierarchy.set_selected_object_by_id(object_id, clear_search=True)
 
         if not self.hierarchy.get_ui_mode():
-            self.inspector_panel.set_selected_object(obj)
+            self.inspector_panel.set_selected_object_id(object_id)
             self.project_panel.clear_selection()
             self._set_outline(object_id)
             self.event_bus.emit(EditorEvent.SELECTION_CHANGED, obj)
@@ -1603,12 +2226,14 @@ class EditorBootstrap:
                 CompoundCommand,
                 CreateGameObjectCommand, DeleteGameObjectCommand,
                 ReparentCommand, MoveGameObjectCommand,
+                AddNativeComponentCommand, RemoveNativeComponentCommand,
                 AddPyComponentCommand, RemovePyComponentCommand,
             )
             cls._STRUCTURAL_CMD_TYPES = (
                 CompoundCommand,
                 CreateGameObjectCommand, DeleteGameObjectCommand,
                 ReparentCommand, MoveGameObjectCommand,
+                AddNativeComponentCommand, RemoveNativeComponentCommand,
                 AddPyComponentCommand, RemovePyComponentCommand,
             )
         return cls._STRUCTURAL_CMD_TYPES
@@ -1660,14 +2285,13 @@ class EditorBootstrap:
             from Infernux.lib import SceneManager
             scene = SceneManager.instance().get_active_scene()
             obj = scene.find_by_id(primary) if scene else None
-            self.inspector_panel.set_selected_object(obj)
+            self.inspector_panel.set_selected_object_id(primary)
             # Expand hierarchy to reveal without re-triggering selection callback
             if obj:
                 self.hierarchy.expand_to_object(obj.id)
         else:
-            self.inspector_panel.set_selected_object(None)
+            self.inspector_panel.set_selected_object_id(0)
 
-    # ── Phase 8: Wire UI Editor ────────────────────────────────────────
 
     def _wire_ui_editor(self):
         ui_editor = self.ui_editor
@@ -1706,7 +2330,6 @@ class EditorBootstrap:
 
         ClosablePanel.set_on_panel_focus_changed(on_panel_focus_changed)
 
-    # ── Phase 9: Scene-change cleanup ──────────────────────────────────
 
     def _setup_scene_change_cleanup(self):
         def on_scene_changed():
@@ -1714,15 +2337,13 @@ class EditorBootstrap:
             from Infernux.engine.ui.selection_manager import SelectionManager
             SelectionManager.instance().clear()
             self.hierarchy.clear_selection_and_notify()
-            self.inspector_panel.set_selected_object(None)
+            self.inspector_panel.set_selected_object_id(0)
             self._set_outline(0)
             self.scene_view._fly_to_active = False
             self.scene_view._fly_to_last_obj_id = 0
             self.scene_view._fly_to_close = False
 
         self.scene_file_manager.set_on_scene_changed(on_scene_changed)
-
-    # ── Phase 11: Layout persistence ───────────────────────────────────
 
     def _setup_layout_persistence(self):
         project_name = os.path.basename(self.project_path)
@@ -1792,8 +2413,6 @@ class EditorBootstrap:
         _panel_state.put("project", {"current_path": self.project_panel.get_current_path()})
         _panel_state.put("window_manager", self.window_manager.save_state())
         _panel_state.save()
-
-    # ── Phase 12: Load initial scene ───────────────────────────────────
 
     def _load_initial_scene(self):
         import Infernux.renderstack  # noqa: F401 — ensure RenderStack is discoverable

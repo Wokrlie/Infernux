@@ -8,6 +8,7 @@
 #include <function/editor/ConsolePanel.h>
 #include <function/editor/EditorPanel.h>
 #include <function/editor/HierarchyPanel.h>
+#include <function/editor/InspectorPanel.h>
 #include <function/editor/MenuBarPanel.h>
 #include <function/editor/ProjectPanel.h>
 #include <function/editor/StatusBarPanel.h>
@@ -815,6 +816,104 @@ void RegisterGUIBindings(py::module_ &m)
         .def_readwrite("invalidate_asset_inspector", &ProjectPanel::invalidateAssetInspector)
         // Translation
         .def_readwrite("translate", &ProjectPanel::translate);
+
+    // ── InspectorPanel ─────────────────────────────────────────────────
+    py::class_<ComponentInfo>(m, "InspectorComponentInfo")
+        .def(py::init<>())
+        .def_readwrite("type_name", &ComponentInfo::typeName)
+        .def_readwrite("component_id", &ComponentInfo::componentId)
+        .def_readwrite("enabled", &ComponentInfo::enabled)
+        .def_readwrite("is_native", &ComponentInfo::isNative)
+        .def_readwrite("is_script", &ComponentInfo::isScript)
+        .def_readwrite("is_broken", &ComponentInfo::isBroken)
+        .def_readwrite("broken_error", &ComponentInfo::brokenError);
+
+    py::class_<InspectorPanel::ObjectInfo>(m, "InspectorObjectInfo")
+        .def(py::init<>())
+        .def_readwrite("name", &InspectorPanel::ObjectInfo::name)
+        .def_readwrite("active", &InspectorPanel::ObjectInfo::active)
+        .def_readwrite("tag", &InspectorPanel::ObjectInfo::tag)
+        .def_readwrite("layer", &InspectorPanel::ObjectInfo::layer)
+        .def_readwrite("prefab_guid", &InspectorPanel::ObjectInfo::prefabGuid)
+        .def_readwrite("hide_transform", &InspectorPanel::ObjectInfo::hideTransform);
+
+    py::class_<InspectorPanel::TransformData>(m, "InspectorTransformData")
+        .def(py::init<>())
+        .def_readwrite("px", &InspectorPanel::TransformData::px)
+        .def_readwrite("py_", &InspectorPanel::TransformData::py)  // avoid shadow of pybind11 py
+        .def_readwrite("pz", &InspectorPanel::TransformData::pz)
+        .def_readwrite("rx", &InspectorPanel::TransformData::rx)
+        .def_readwrite("ry", &InspectorPanel::TransformData::ry)
+        .def_readwrite("rz", &InspectorPanel::TransformData::rz)
+        .def_readwrite("sx", &InspectorPanel::TransformData::sx)
+        .def_readwrite("sy", &InspectorPanel::TransformData::sy)
+        .def_readwrite("sz", &InspectorPanel::TransformData::sz);
+
+    py::class_<InspectorPanel::AddComponentEntry>(m, "InspectorAddComponentEntry")
+        .def(py::init<>())
+        .def_readwrite("display_name", &InspectorPanel::AddComponentEntry::displayName)
+        .def_readwrite("category", &InspectorPanel::AddComponentEntry::category)
+        .def_readwrite("is_native", &InspectorPanel::AddComponentEntry::isNative)
+        .def_readwrite("script_path", &InspectorPanel::AddComponentEntry::scriptPath);
+
+    py::class_<InspectorPanel::PrefabInfo>(m, "InspectorPrefabInfo")
+        .def(py::init<>())
+        .def_readwrite("override_count", &InspectorPanel::PrefabInfo::overrideCount)
+        .def_readwrite("is_readonly", &InspectorPanel::PrefabInfo::isReadonly)
+        .def_readwrite("is_transform_readonly", &InspectorPanel::PrefabInfo::isTransformReadonly);
+
+    py::class_<InspectorPanel, EditorPanel, std::shared_ptr<InspectorPanel>>(m, "InspectorPanel")
+        .def(py::init<>())
+        // Public API
+        .def("set_selected_object_id", &InspectorPanel::SetSelectedObjectId, py::arg("id"))
+        .def("clear_selected_object", &InspectorPanel::ClearSelectedObject)
+        .def("get_selected_object_id", &InspectorPanel::GetSelectedObjectId)
+        .def("set_selected_file", &InspectorPanel::SetSelectedFile, py::arg("file_path"), py::arg("category"))
+        .def("clear_selected_file", &InspectorPanel::ClearSelectedFile)
+        .def("get_selected_file", &InspectorPanel::GetSelectedFile)
+        .def("set_detail_file", &InspectorPanel::SetDetailFile, py::arg("file_path"), py::arg("category"))
+        // Selection callbacks
+        .def_readwrite("is_multi_selection", &InspectorPanel::isMultiSelection)
+        .def_readwrite("get_selected_ids", &InspectorPanel::getSelectedIds)
+        // Object info callbacks
+        .def_readwrite("get_object_info", &InspectorPanel::getObjectInfo)
+        .def_readwrite("set_object_property", &InspectorPanel::setObjectProperty)
+        // Transform callbacks
+        .def_readwrite("get_transform_data", &InspectorPanel::getTransformData)
+        .def_readwrite("set_transform_data", &InspectorPanel::setTransformData)
+        // Component enumeration
+        .def_readwrite("get_component_list", &InspectorPanel::getComponentList)
+        .def_readwrite("get_component_icon_id", &InspectorPanel::getComponentIconId)
+        // Component body rendering
+        .def_readwrite("render_component_body", &InspectorPanel::renderComponentBody)
+        .def_readwrite("render_component_context_menu", &InspectorPanel::renderComponentContextMenu)
+        .def_readwrite("set_component_enabled", &InspectorPanel::setComponentEnabled)
+        // Add Component
+        .def_readwrite("get_add_component_entries", &InspectorPanel::getAddComponentEntries)
+        .def_readwrite("add_component", &InspectorPanel::addComponent)
+        // Remove Component
+        .def_readwrite("remove_component", &InspectorPanel::removeComponent)
+        // Asset / File preview
+        .def_readwrite("render_asset_inspector", &InspectorPanel::renderAssetInspector)
+        .def_readwrite("render_file_preview", &InspectorPanel::renderFilePreview)
+        // Material sections
+        .def_readwrite("render_material_sections", &InspectorPanel::renderMaterialSections)
+        // Prefab
+        .def_readwrite("get_prefab_info", &InspectorPanel::getPrefabInfo)
+        .def_readwrite("prefab_action", &InspectorPanel::prefabAction)
+        // Undo
+        .def_readwrite("undo_begin_frame", &InspectorPanel::undoBeginFrame)
+        .def_readwrite("undo_end_frame", &InspectorPanel::undoEndFrame)
+        .def_readwrite("undo_invalidate_all", &InspectorPanel::undoInvalidateAll)
+        // Tag & Layer
+        .def_readwrite("get_all_tags", &InspectorPanel::getAllTags)
+        .def_readwrite("get_all_layers", &InspectorPanel::getAllLayers)
+        // Translation
+        .def_readwrite("translate", &InspectorPanel::translate)
+        // Script drop
+        .def_readwrite("handle_script_drop", &InspectorPanel::handleScriptDrop)
+        // Window manager
+        .def_readwrite("open_window", &InspectorPanel::openWindow);
 }
 
 } // namespace infernux
