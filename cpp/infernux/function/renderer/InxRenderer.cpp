@@ -455,6 +455,7 @@ void InxRenderer::DrawFrame()
     }
 
     // Update scene system
+    auto _sceneUpdateStart = std::chrono::high_resolution_clock::now();
     SceneManager::Instance().Update(m_deltaTime);
 
     // LateUpdate runs immediately after Update — before rendering — so that
@@ -462,6 +463,8 @@ void InxRenderer::DrawFrame()
     // results are picked up by the same frame's render pass.  This matches
     // Unity's execution order: FixedUpdate → Update → LateUpdate → Render.
     SceneManager::Instance().LateUpdate(m_deltaTime);
+    auto _sceneUpdateEnd = std::chrono::high_resolution_clock::now();
+    m_sceneUpdateMs = std::chrono::duration<double, std::milli>(_sceneUpdateEnd - _sceneUpdateStart).count();
 #if INFERNUX_FRAME_PROFILE
     _fp.stamp(); // [2] after SceneManager::Update + LateUpdate
 #endif
@@ -496,7 +499,10 @@ void InxRenderer::DrawFrame()
         m_preGuiCallback();
     }
 
+    auto _guiBuildStart = std::chrono::high_resolution_clock::now();
     m_gui->BuildFrame();
+    auto _guiBuildEnd = std::chrono::high_resolution_clock::now();
+    m_guiBuildMs = std::chrono::duration<double, std::milli>(_guiBuildEnd - _guiBuildStart).count();
 #if INFERNUX_FRAME_PROFILE
     _fp.stamp(); // [4] after GUI::BuildFrame (ImGui → Python panels)
 #endif
@@ -504,7 +510,10 @@ void InxRenderer::DrawFrame()
     // Prepare scene rendering data (collect + cull + sort) AFTER GUI processing
     // so we always operate on the current scene state.
     SceneRenderBridge &bridge = SceneRenderBridge::Instance();
+    auto _prepareStart = std::chrono::high_resolution_clock::now();
     bridge.PrepareFrame();
+    auto _prepareEnd = std::chrono::high_resolution_clock::now();
+    m_prepareFrameMs = std::chrono::duration<double, std::milli>(_prepareEnd - _prepareStart).count();
 #if INFERNUX_FRAME_PROFILE
     _fp.stamp(); // [5] after PrepareFrame (CollectRenderables)
 #endif
@@ -735,6 +744,9 @@ void InxRenderer::DrawFrame()
 #endif
 
     SceneManager::Instance().EndFrame();
+
+    // Compute game-only frame cost: sum of game phases, excluding editor UI.
+    m_gameOnlyFrameMs = m_sceneUpdateMs + m_prepareFrameMs + m_lastGameRenderMs;
 
     // ========================================================================
     // Post-draw callback: scene loading / deferred tasks that must run

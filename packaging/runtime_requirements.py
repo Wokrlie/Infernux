@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-RUNTIME_PROFILE_VERSION = 1
+RUNTIME_PROFILE_VERSION = 2
 
 # Keep the managed runtime limited to the packages needed to launch Infernux
 # projects and build standalone players from a project's private Python copy.
@@ -12,6 +12,7 @@ _RUNTIME_PACKAGE_SPECS: tuple[tuple[str, str], ...] = (
     ("ordered-set", "ordered_set"),
     ("nuitka", "nuitka"),
     ("numpy", "numpy"),
+    ("numba", "numba"),
     ("watchdog", "watchdog"),
     ("Pillow", "PIL"),
     ("imageio", "imageio"),

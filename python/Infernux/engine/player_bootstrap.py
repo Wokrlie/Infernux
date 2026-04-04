@@ -89,8 +89,10 @@ class PlayerBootstrap:
     @staticmethod
     def _precompile_jit():
         try:
-            from Infernux._jit_kernels import precompile as _jit_precompile
-            _jit_precompile()
+            from Infernux.jit import ensure_jit_runtime, precompile_jit
+
+            ensure_jit_runtime(auto_install=False)
+            precompile_jit()
         except ImportError:
             pass
 

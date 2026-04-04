@@ -4,6 +4,8 @@ This module intentionally re-exports the most common scripting symbols so
 user scripts can simply do ``from Infernux import *``.
 """
 
+import importlib
+
 # ── Runtime API (used by game scripts) ─────────────────────────────
 from Infernux.engine import release_engine, Engine, LogLevel
 from Infernux.math import Vector2, Vector3, vec4f, quatf, vector2, vector3, vector4, quaternion
@@ -40,6 +42,23 @@ def _dedupe(items: list[str]) -> list[str]:
             seen.add(item)
             result.append(item)
     return result
+
+
+def __getattr__(name: str):
+    """Lazily expose optional JIT helpers without bloating ``from Infernux import *``.
+
+    This keeps Numba out of ordinary star-import paths while still supporting:
+
+        from Infernux import njit
+        from Infernux import precompile_jit
+        from Infernux import jit
+    """
+    if name == "jit":
+        return importlib.import_module("Infernux.jit")
+    if name in {"njit", "precompile", "precompile_jit", "ensure_jit_runtime", "JIT_AVAILABLE"}:
+        jit_module = importlib.import_module("Infernux.jit")
+        return getattr(jit_module, name)
+    raise AttributeError(f"module 'Infernux' has no attribute {name!r}")
 
 
 __all__ = _dedupe(

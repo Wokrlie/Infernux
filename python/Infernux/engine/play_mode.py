@@ -548,6 +548,12 @@ class PlayModeManager:
             # Read back computed values so PlayModeManager stays in sync
             self._delta_time = Time.delta_time
             self._total_play_time = Time.time
+            # Read game-only frame cost from C++ (previous frame's measurement)
+            if self._native_engine is not None:
+                try:
+                    Time._game_delta_time = self._native_engine.get_game_only_frame_ms() / 1000.0
+                except Exception:
+                    pass
         except ImportError:
             self._delta_time = min(raw_dt * self._time_scale, 0.1)
             self._total_play_time += self._delta_time

@@ -543,6 +543,7 @@ except Exception as _exc:
         import re
 
         found: set[str] = set()
+        uses_infernux_jit = False
 
         # --- Source 1: project requirements.txt -------------------------
         req_path = os.path.join(self.project_path, "requirements.txt")
@@ -575,13 +576,29 @@ except Exception as _exc:
                         if isinstance(node, ast.Import):
                             for alias in node.names:
                                 found.add(alias.name.split(".")[0])
+                                if alias.name in {"Infernux.jit", "Infernux._jit_kernels"}:
+                                    uses_infernux_jit = True
                         elif isinstance(node, ast.ImportFrom):
                             if node.module and node.level == 0:
                                 found.add(node.module.split(".")[0])
+                                if node.module in {"Infernux.jit", "Infernux._jit_kernels"}:
+                                    uses_infernux_jit = True
+                                elif node.module == "Infernux":
+                                    imported_names = {alias.name for alias in node.names}
+                                    if imported_names & {"jit", "njit", "precompile", "precompile_jit", "JIT_AVAILABLE"}:
+                                        uses_infernux_jit = True
 
         # --- Filter: remove stdlib / engine / excluded ------------------
         found -= self._BUILTIN_MODULES
         found -= self._collect_internal_asset_module_names()
+
+        # Public JIT API ultimately depends on numba + llvmlite.  Make that
+        # explicit so standalone player builds include the runtime pieces even
+        # when user scripts import the supported ``Infernux.jit`` surface
+        # instead of importing ``numba`` directly.
+        if uses_infernux_jit or "numba" in found:
+            found.add("numba")
+            found.add("llvmlite")
 
         # Only keep packages that are actually importable in the current
         # environment so Nuitka doesn't error on stale or optional imports.

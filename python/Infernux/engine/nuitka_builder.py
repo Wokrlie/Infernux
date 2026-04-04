@@ -35,6 +35,8 @@ _AUTO_INSTALLABLE_PACKAGES = {
     "nuitka": "nuitka",
     "ordered_set": "ordered-set",
     "PIL": "Pillow",
+    "numba": "numba",
+    "llvmlite": "llvmlite",
 }
 
 
@@ -264,7 +266,12 @@ class NuitkaBuilder:
     def _check_nuitka(self):
         """Ensure Nuitka and build-time project dependencies are installed."""
         try:
-            _ensure_python_packages(self._builder_python, "nuitka", "ordered_set")
+            _ensure_python_packages(
+                self._builder_python,
+                "nuitka",
+                "ordered_set",
+                *self.extra_include_packages,
+            )
             _install_requirements_files(
                 self._builder_python,
                 self.extra_requirements_files,

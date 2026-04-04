@@ -137,8 +137,10 @@ class EditorBootstrap:
 
     @staticmethod
     def _precompile_jit():
-        from Infernux._jit_kernels import precompile as _jit_precompile
-        _jit_precompile()
+        from Infernux.jit import ensure_jit_runtime, precompile_jit
+
+        ensure_jit_runtime(auto_install=True)
+        precompile_jit()
 
 
     def _init_engine(self):

@@ -33,6 +33,9 @@ except ImportError:
         return _wrap
 
 
+JIT_AVAILABLE = _HAS_NUMBA
+
+
 # ====================================================================
 # Kernel: smooth_damp (critically-damped spring)
 # ====================================================================
@@ -131,3 +134,13 @@ def precompile():
     jit_smooth_damp(0.0, 1.0, 0.0, 0.3, float('inf'), 0.016)
     jit_contains_point_rotated(50.0, 50.0, 0.0, 0.0, 100.0, 100.0, 0.0, 1.0)
     jit_wire_sphere_trig(24)
+
+
+__all__ = [
+    "njit",
+    "JIT_AVAILABLE",
+    "jit_smooth_damp",
+    "jit_contains_point_rotated",
+    "jit_wire_sphere_trig",
+    "precompile",
+]

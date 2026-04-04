@@ -20,7 +20,7 @@ namespace infernux
 struct FpsIdling
 {
     float fpsIdle = 10.0f;          ///< Target FPS when idling (0 = disable idle)
-    float editorFpsCap = 60.0f;     ///< Max FPS in editor mode (0 = uncapped)
+    float editorFpsCap = 144.0f;     ///< Max FPS in editor mode (0 = uncapped)
     bool enableIdling = true;       ///< Master switch for idle detection
     bool isIdling = false;          ///< Output — true when the last frame went idle
 };

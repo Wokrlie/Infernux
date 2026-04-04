@@ -12,6 +12,14 @@ Example::
 
 from __future__ import annotations
 
+from typing import Any
+
+JIT_AVAILABLE: bool
+
+def njit(*args: Any, **kwargs: Any) -> Any:
+    """Numba ``njit`` decorator, or a no-op fallback when Numba is unavailable."""
+    ...
+
 def jit_smooth_damp(
     current: float,
     target: float,
@@ -78,3 +86,5 @@ def precompile() -> None:
     Call once at engine startup. Does nothing when Numba is not installed.
     """
     ...
+
+__all__: list[str]

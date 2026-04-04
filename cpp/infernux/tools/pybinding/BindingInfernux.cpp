@@ -581,6 +581,34 @@ PYBIND11_MODULE(_Infernux, m)
             },
             "Get last frame's game view render time (CPU command recording) in ms, excluding editor panels")
         .def(
+            "get_game_only_frame_ms",
+            [](Infernux &self) -> double {
+                auto *r = self.GetRenderer();
+                return r ? r->GetGameOnlyFrameMs() : 0.0;
+            },
+            "Get game-only frame cost in ms (SceneUpdate + PrepareFrame + GameRender), excluding editor panels")
+        .def(
+            "get_scene_update_ms",
+            [](Infernux &self) -> double {
+                auto *r = self.GetRenderer();
+                return r ? r->GetSceneUpdateMs() : 0.0;
+            },
+            "Get SceneManager::Update + LateUpdate time in ms")
+        .def(
+            "get_gui_build_ms",
+            [](Infernux &self) -> double {
+                auto *r = self.GetRenderer();
+                return r ? r->GetGuiBuildMs() : 0.0;
+            },
+            "Get GUI::BuildFrame (all ImGui panels) time in ms")
+        .def(
+            "get_prepare_frame_ms",
+            [](Infernux &self) -> double {
+                auto *r = self.GetRenderer();
+                return r ? r->GetPrepareFrameMs() : 0.0;
+            },
+            "Get PrepareFrame (collect/cull renderables) time in ms")
+        .def(
             "get_screen_ui_renderer",
             [](Infernux &self) -> InxScreenUIRenderer * {
                 auto *r = self.GetRenderer();

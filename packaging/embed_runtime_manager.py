@@ -357,20 +357,22 @@ class PythonRuntimeManager:
             python_exe = self._provision_managed_runtime(on_status=on_status)
         else:
             runtime_root = os.path.dirname(python_exe)
+            has_build_support = _has_build_support(runtime_root)
+            has_required_modules = self._has_modules(python_exe, *_REQUIRED_RUNTIME_MODULES)
             if is_frozen() and not allow_frozen_repair:
-                if not _has_build_support(runtime_root):
+                if not has_build_support:
                     raise PythonRuntimeError(
                         "The installed managed Python 3.12 runtime is missing CPython build support files.\n"
                         "Please reinstall Infernux Hub so the runtime can be prepared during installation."
                     )
-                if not self._has_modules(python_exe, *_REQUIRED_RUNTIME_MODULES):
+                if not has_required_modules:
                     raise PythonRuntimeError(
                         "The installed managed Python 3.12 runtime is missing required engine/build packages.\n"
                         "Please reinstall Infernux Hub so the runtime can be prepared during installation."
                     )
                 return python_exe
 
-            if allow_frozen_repair:
+            if allow_frozen_repair and is_frozen() and (not has_build_support or not has_required_modules):
                 repaired_python = self._seed_runtime_from_bundle(overwrite=True, on_status=on_status)
                 if not repaired_python:
                     repaired_python = self._install_runtime_to_root(
@@ -391,7 +393,7 @@ class PythonRuntimeManager:
         Each project owns its own complete Python copy so there is no need
         for virtual-environment indirection.
         """
-        self.ensure_runtime()
+        self.ensure_runtime(allow_frozen_repair=is_frozen())
         source = self.private_runtime_root()
         if not os.path.isdir(source):
             raise PythonRuntimeError(

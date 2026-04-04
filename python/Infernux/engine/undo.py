@@ -1442,8 +1442,6 @@ class UndoManager:
             parts.append(f"{i}: {cmd.description}")
         for j, cmd in enumerate(self._redo_stack[::-1], pos + 1):
             parts.append(f"{j}: (redo) {cmd.description}")
-        seq = "  |  ".join(parts) if parts else "(empty)"
-        Debug.log(f"[Undo:{action}] pos={pos}/{total}  {seq}")
 
     def _sync_dirty(self) -> None:
         from Infernux.engine.play_mode import PlayModeManager, PlayModeState

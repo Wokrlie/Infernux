@@ -207,6 +207,19 @@ class InxRenderer
     /// This measures ONLY the game camera render pipeline, excluding editor panels, scene view, etc.
     [[nodiscard]] double GetLastGameRenderMs() const { return m_lastGameRenderMs; }
 
+    /// @brief Get game-only frame cost in ms (SceneUpdate + PrepareFrame + GameRender).
+    /// Excludes editor panel rendering (Inspector, Hierarchy, Console, etc.).
+    [[nodiscard]] double GetGameOnlyFrameMs() const { return m_gameOnlyFrameMs; }
+
+    /// @brief Get SceneManager::Update + LateUpdate time in ms.
+    [[nodiscard]] double GetSceneUpdateMs() const { return m_sceneUpdateMs; }
+
+    /// @brief Get GUI::BuildFrame time in ms (all ImGui panels).
+    [[nodiscard]] double GetGuiBuildMs() const { return m_guiBuildMs; }
+
+    /// @brief Get PrepareFrame (collect/cull renderables) time in ms.
+    [[nodiscard]] double GetPrepareFrameMs() const { return m_prepareFrameMs; }
+
     /// @brief Get the screen UI renderer for GPU-based 2D screen-space UI
     /// @return Pointer to InxScreenUIRenderer, or nullptr if not initialized
     InxScreenUIRenderer *GetScreenUIRenderer();
@@ -317,6 +330,10 @@ class InxRenderer
     bool m_gameCameraEnabled = false;
     bool m_sceneViewVisible = true; ///< Set from Python scene_view_panel visibility
     double m_lastGameRenderMs = 0.0; ///< Per-frame game render time (CPU command recording)
+    double m_sceneUpdateMs = 0.0;    ///< SceneManager::Update + LateUpdate (ms)
+    double m_guiBuildMs = 0.0;       ///< GUI::BuildFrame (all ImGui panels) (ms)
+    double m_prepareFrameMs = 0.0;   ///< PrepareFrame (collect/cull) (ms)
+    double m_gameOnlyFrameMs = 0.0;  ///< Sum of game-only phases (ms)
 
     /// Per-frame cached game camera pointer, lazily resolved once per frame
     /// by FindGameCameraCached() and cleared at the start of each DrawFrame.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 
 import pytest
@@ -23,6 +24,12 @@ def _make_project(tmp_path):
 def _make_builder(tmp_path, output_dir):
     project_root = _make_project(tmp_path)
     return GameBuilder(str(project_root), str(output_dir), game_name="TestGame")
+
+
+def _write_asset_script(project_root, relative_path: str, source: str) -> None:
+    script_path = project_root / "Assets" / relative_path
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.write_text(source, encoding="utf-8")
 
 
 class TestGameBuilderOutputSafety:
@@ -72,3 +79,41 @@ class TestGameBuilderOutputSafety:
         assert payload["tool"] == "Infernux"
         assert payload["kind"] == "build-output"
         assert payload["project_name"] == "TestGame"
+
+
+class TestGameBuilderDependencyCollection:
+    def test_collect_user_dependencies_adds_llvmlite_for_numba_import(self, tmp_path, monkeypatch):
+        project_root = _make_project(tmp_path)
+        _write_asset_script(project_root, "stress.py", "import numba\n")
+        builder = GameBuilder(str(project_root), str(tmp_path / "build_output"), game_name="TestGame")
+
+        original_find_spec = importlib.util.find_spec
+
+        def fake_find_spec(name):
+            if name in {"numba", "llvmlite"}:
+                return object()
+            return original_find_spec(name)
+
+        monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+
+        deps = builder._collect_user_dependencies()
+
+        assert deps == ["llvmlite", "numba"]
+
+    def test_collect_user_dependencies_detects_public_infernux_jit_api(self, tmp_path, monkeypatch):
+        project_root = _make_project(tmp_path)
+        _write_asset_script(project_root, "jit_user.py", "from Infernux.jit import njit\n")
+        builder = GameBuilder(str(project_root), str(tmp_path / "build_output"), game_name="TestGame")
+
+        original_find_spec = importlib.util.find_spec
+
+        def fake_find_spec(name):
+            if name in {"numba", "llvmlite"}:
+                return object()
+            return original_find_spec(name)
+
+        monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+
+        deps = builder._collect_user_dependencies()
+
+        assert deps == ["llvmlite", "numba"]
