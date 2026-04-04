@@ -1462,8 +1462,10 @@ def _render_asset_reference_field(ctx, comp, field_name, metadata, current_value
 def render_py_component(ctx: InxGUIContext, py_comp):
     """Render a Python InxComponent's serialized fields.
 
-    If a custom renderer is registered via ``register_py_component_renderer``,
-    it is used instead of the generic field-based renderer.
+    Dispatch priority:
+    1. ``on_inspector_gui(ctx)`` override on the component class itself
+    2. Custom renderer registered via ``register_py_component_renderer``
+    3. Generic auto-generated serialized-field inspector
 
     Uses C++ batch property renderer for scalar fields to minimize pybind11
     overhead.  Non-scalar fields are rendered individually.
@@ -1473,6 +1475,21 @@ def render_py_component(ctx: InxGUIContext, py_comp):
       ``collapsing_header`` section.
     - ``info_text``: dimmed description line rendered after the field.
     """
+    # 1. Check for on_inspector_gui override on the component class
+    on_gui = getattr(type(py_comp), 'on_inspector_gui', None)
+    if on_gui is not None:
+        from Infernux.components.component import InxComponent
+        # Only use if the method is actually overridden (not the base stub)
+        if on_gui is not InxComponent.on_inspector_gui:
+            _record_profile_count("bodyPyCustom_count")
+            _py_custom_t0 = _time.perf_counter()
+            try:
+                py_comp.on_inspector_gui(ctx)
+            finally:
+                _record_profile_timing("bodyPyCustom", _py_custom_t0)
+            return
+
+    # 2. Check for registered custom renderer
     renderer = _PY_COMPONENT_RENDERERS.get(py_comp.type_name)
     if renderer:
         _record_profile_count("bodyPyCustom_count")
@@ -1482,6 +1499,8 @@ def render_py_component(ctx: InxGUIContext, py_comp):
         finally:
             _record_profile_timing("bodyPyCustom", _py_custom_t0)
         return
+
+    # 3. Generic serialized-field renderer
     from Infernux.components.serialized_field import get_serialized_fields, FieldType
 
     fields = get_serialized_fields(py_comp.__class__)
@@ -2134,6 +2153,6 @@ register_component_extra_renderer("MeshRenderer", _render_mesh_renderer_material
 # ============================================================================
 # Auto-register Python component renderers
 # ============================================================================
-from .inspector_renderstack import render_renderstack_inspector
-register_py_component_renderer("RenderStack", render_renderstack_inspector)
+# NOTE: RenderStack now uses on_inspector_gui() on the component class itself,
+# so it no longer needs a register_py_component_renderer() call here.
 from . import inspector_ui_components  # Registers UI component inspectors.

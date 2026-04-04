@@ -203,6 +203,15 @@ class RenderStack(InxComponent):
                     return
 
     # ------------------------------------------------------------------
+    # Custom inspector
+    # ------------------------------------------------------------------
+
+    def on_inspector_gui(self, ctx) -> None:
+        """Render the RenderStack custom inspector panel."""
+        from Infernux.engine.ui.inspector_renderstack import render_renderstack_inspector
+        render_renderstack_inspector(ctx, self)
+
+    # ------------------------------------------------------------------
     # Serialization hooks
     # ------------------------------------------------------------------
 

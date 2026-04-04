@@ -818,6 +818,33 @@ class InxComponent:
         """
         pass
 
+    def on_inspector_gui(self, ctx) -> None:
+        """
+        Override to draw a fully custom inspector for this component.
+
+        When this method is overridden in a subclass, the engine will call
+        it instead of auto-generating the inspector from serialized fields.
+        ``ctx`` is an :class:`InxGUIContext` providing the full ImGui API.
+
+        Return *None*.  The default implementation returns
+        :data:`NotImplemented` to signal "use the auto-generated inspector".
+
+        Example::
+
+            class MyComponent(InxComponent):
+                health: float = serialized_field(default=100.0)
+
+                def on_inspector_gui(self, ctx):
+                    ctx.label("Custom Inspector")
+                    new_val = ctx.float_slider("##health", self.health, 0, 200)
+                    if abs(new_val - self.health) > 1e-5:
+                        self.health = new_val
+
+        NOTE: This is editor-only; it is never called during play mode in
+        standalone builds.
+        """
+        return NotImplemented
+
     def on_validate(self):
         """
         Called in the editor when the component is loaded or a value changes.

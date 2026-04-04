@@ -29,6 +29,7 @@ if not _os.environ.get("_INFERNUX_PLAYER_MODE"):
     from .editor_services import EditorServices
     from .event_bus import EditorEventBus, EditorEvent
     from .panel_registry import PanelRegistry, editor_panel
+    from .editor_window import EditorWindow, editor_window
 
     __all__ = [
         "MenuBarPanel",
@@ -58,6 +59,8 @@ if not _os.environ.get("_INFERNUX_PLAYER_MODE"):
         "EditorEvent",
         "PanelRegistry",
         "editor_panel",
+        "EditorWindow",
+        "editor_window",
     ]
 else:
     __all__ = []
