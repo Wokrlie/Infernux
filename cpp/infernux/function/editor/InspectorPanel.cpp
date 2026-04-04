@@ -24,6 +24,26 @@ InspectorPanel::InspectorPanel()
 }
 
 // ============================================================================
+// Sub-timing snapshot (consumed + reset by profile system)
+// ============================================================================
+
+std::unordered_map<std::string, double> InspectorPanel::ConsumeSubTimings()
+{
+    std::unordered_map<std::string, double> out;
+    out["info"] = m_subGetInfo;
+    out["transform"] = m_subTransform;
+    out["compList"] = m_subGetComponents;
+    out["compBody"] = m_subComponentBodies;
+    out["material"] = m_subMaterials;
+    m_subGetInfo = 0.0;
+    m_subTransform = 0.0;
+    m_subGetComponents = 0.0;
+    m_subComponentBodies = 0.0;
+    m_subMaterials = 0.0;
+    return out;
+}
+
+// ============================================================================
 // Translation cache
 // ============================================================================
 
@@ -320,6 +340,11 @@ float InspectorPanel::RenderSplitter(InxGUIContext * /*ctx*/, float totalHeight)
 
 void InspectorPanel::RenderSingleObject(InxGUIContext *ctx, uint64_t objId)
 {
+    using clock = std::chrono::high_resolution_clock;
+
+    // ── Sub-timing: getObjectInfo + getPrefabInfo ────────────────────
+    auto t0 = clock::now();
+
     if (getObjectInfo)
         m_cachedObjInfo = getObjectInfo(objId);
     m_cachedObjInfoId = objId;
@@ -327,6 +352,9 @@ void InspectorPanel::RenderSingleObject(InxGUIContext *ctx, uint64_t objId)
         m_cachedPrefabInfo = getPrefabInfo(objId);
     else
         m_cachedPrefabInfo = {};
+
+    auto t1 = clock::now();
+    m_subGetInfo += std::chrono::duration<double, std::milli>(t1 - t0).count();
 
     const auto &info = m_cachedObjInfo;
     const auto &pinfo = m_cachedPrefabInfo;
@@ -354,6 +382,9 @@ void InspectorPanel::RenderSingleObject(InxGUIContext *ctx, uint64_t objId)
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0, EditorTheme::INSPECTOR_SECTION_GAP));
 
+    // ── Sub-timing: Transform ────────────────────────────────────────
+    auto t2 = clock::now();
+
     // Transform (skip for screen-space UI elements)
     if (!info.hideTransform)
     {
@@ -374,14 +405,26 @@ void InspectorPanel::RenderSingleObject(InxGUIContext *ctx, uint64_t objId)
         }
     }
 
+    auto t3 = clock::now();
+    m_subTransform += std::chrono::duration<double, std::milli>(t3 - t2).count();
+
     // --- Prefab instance: disable everything below Transform ---
     if (isPrefabReadonly)
         ImGui::BeginDisabled();
+
+    // ── Sub-timing: getComponentList ─────────────────────────────────
+    auto t4 = clock::now();
 
     // Get component list via callback
     std::vector<ComponentInfo> components;
     if (getComponentList)
         components = getComponentList(objId);
+
+    auto t5 = clock::now();
+    m_subGetComponents += std::chrono::duration<double, std::milli>(t5 - t4).count();
+
+    // ── Sub-timing: Component bodies ─────────────────────────────────
+    auto t6 = clock::now();
 
     // Render each component
     for (const auto &comp : components)
@@ -445,9 +488,18 @@ void InspectorPanel::RenderSingleObject(InxGUIContext *ctx, uint64_t objId)
     ImGui::Dummy(ImVec2(0, EditorTheme::INSPECTOR_SECTION_GAP));
     RenderAddComponentPopup(ctx);
 
+    auto t7 = clock::now();
+    m_subComponentBodies += std::chrono::duration<double, std::milli>(t7 - t6).count();
+
+    // ── Sub-timing: Material sections ────────────────────────────────
+    auto t8 = clock::now();
+
     // Material override sections
     if (renderMaterialSections)
         renderMaterialSections(ctx, objId);
+
+    auto t9 = clock::now();
+    m_subMaterials += std::chrono::duration<double, std::milli>(t9 - t8).count();
 
     if (isPrefabReadonly)
         ImGui::EndDisabled();

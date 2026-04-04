@@ -203,6 +203,10 @@ class InxRenderer
         return m_gameCameraEnabled;
     }
 
+    /// @brief Get last frame's game view render time (CPU-side command recording) in ms.
+    /// This measures ONLY the game camera render pipeline, excluding editor panels, scene view, etc.
+    [[nodiscard]] double GetLastGameRenderMs() const { return m_lastGameRenderMs; }
+
     /// @brief Get the screen UI renderer for GPU-based 2D screen-space UI
     /// @return Pointer to InxScreenUIRenderer, or nullptr if not initialized
     InxScreenUIRenderer *GetScreenUIRenderer();
@@ -312,6 +316,7 @@ class InxRenderer
     std::unique_ptr<InxScreenUIRenderer> m_screenUIRenderer;
     bool m_gameCameraEnabled = false;
     bool m_sceneViewVisible = true; ///< Set from Python scene_view_panel visibility
+    double m_lastGameRenderMs = 0.0; ///< Per-frame game render time (CPU command recording)
 
     /// Per-frame cached game camera pointer, lazily resolved once per frame
     /// by FindGameCameraCached() and cleared at the start of each DrawFrame.

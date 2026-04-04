@@ -25,6 +25,27 @@ struct FpsIdling
     bool isIdling = false;          ///< Output — true when the last frame went idle
 };
 
+/// Per-frame pacing diagnostics for editor FPS cap / idle mode.
+/// This is intentionally lightweight so the renderer profiler can report
+/// whether frame pacing is actually sleeping the main loop.
+struct FramePacingSample
+{
+    bool playModeBypass = false;
+    bool idleMode = false;
+    bool slept = false;
+    bool wokeByEvent = false;
+    bool wokeByInputEvent = false;
+    bool wokeByWindowEvent = false;
+    bool wokeByOtherEvent = false;
+    bool hadInputEvent = false;
+    int cooldownRemaining = 0;
+    float targetFps = 0.0f;
+    double elapsedBeforeSleepMs = 0.0;
+    double frameBudgetMs = 0.0;
+    double requestedSleepMs = 0.0;
+    double actualSleepMs = 0.0;
+};
+
 class InxView
 {
   public:
@@ -82,6 +103,10 @@ class InxView
     {
         return m_idling;
     }
+    const FramePacingSample &GetLastPacingSample() const
+    {
+        return m_lastPacingSample;
+    }
 
     /// Tell InxView whether the engine is in play mode.
     /// When true, the frame-rate cap and idle sleep are both disabled.
@@ -119,6 +144,7 @@ class InxView
 
     // ---- Power-save idle state ----
     FpsIdling m_idling;
+    FramePacingSample m_lastPacingSample;
     /// Number of full-speed frames remaining after the last user interaction.
     /// When this reaches 0 and idling is enabled the loop will sleep more.
     static constexpr int ACTIVE_COOLDOWN_FRAMES = 3;

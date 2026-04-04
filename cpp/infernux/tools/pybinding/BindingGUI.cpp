@@ -528,7 +528,121 @@ void RegisterGUIBindings(py::module_ &m)
             },
             py::arg("px"), py::arg("py"), py::arg("pz"), py::arg("rx"), py::arg("ry"), py::arg("rz"), py::arg("sx"),
             py::arg("sy"), py::arg("sz"), py::arg("speed_pos"), py::arg("speed_rot"), py::arg("speed_scl"),
-            py::arg("label_width"), "Render Position/Rotation/Scale vector3 controls in one call.");
+            py::arg("label_width"), "Render Position/Rotation/Scale vector3 controls in one call.")
+        // ── Batch property renderer (N fields in 1 call) ───────────
+        .def(
+            "render_property_batch",
+            [](InxGUIContext &ctx, py::list descriptors, float labelWidth) -> py::dict {
+                // Convert Python list-of-dicts to std::vector<PropertyDesc>
+                std::vector<PropertyDesc> props;
+                const int n = static_cast<int>(py::len(descriptors));
+                props.reserve(n);
+                for (int i = 0; i < n; ++i)
+                {
+                    py::dict d = descriptors[i].cast<py::dict>();
+                    PropertyDesc p;
+                    p.type = static_cast<PropertyDesc::Type>(d["t"].cast<int>());
+                    p.widgetId = d["w"].cast<std::string>();
+                    p.label = d["n"].cast<std::string>();
+                    switch (p.type)
+                    {
+                    case PropertyDesc::Float:
+                        p.fVal[0] = d["f"].cast<float>();
+                        break;
+                    case PropertyDesc::Int:
+                        p.iVal = d["i"].cast<int>();
+                        break;
+                    case PropertyDesc::Bool:
+                        p.bVal = d["b"].cast<bool>();
+                        break;
+                    case PropertyDesc::String:
+                        p.sVal = d["s"].cast<std::string>();
+                        break;
+                    case PropertyDesc::Vec2:
+                        p.fVal[0] = d["f"].cast<float>();
+                        p.fVal[1] = d["f2"].cast<float>();
+                        break;
+                    case PropertyDesc::Vec3:
+                        p.fVal[0] = d["f"].cast<float>();
+                        p.fVal[1] = d["f2"].cast<float>();
+                        p.fVal[2] = d["f3"].cast<float>();
+                        break;
+                    case PropertyDesc::Vec4:
+                        p.fVal[0] = d["f"].cast<float>();
+                        p.fVal[1] = d["f2"].cast<float>();
+                        p.fVal[2] = d["f3"].cast<float>();
+                        p.fVal[3] = d["f4"].cast<float>();
+                        break;
+                    case PropertyDesc::Enum:
+                        p.iVal = d["ei"].cast<int>();
+                        p.enumNames = d["en"].cast<std::vector<std::string>>();
+                        break;
+                    case PropertyDesc::Color:
+                        p.fVal[0] = d["f"].cast<float>();
+                        p.fVal[1] = d["f2"].cast<float>();
+                        p.fVal[2] = d["f3"].cast<float>();
+                        p.fVal[3] = d["f4"].cast<float>();
+                        break;
+                    }
+                    if (d.contains("mn"))
+                        p.rangeMin = d["mn"].cast<float>();
+                    if (d.contains("mx"))
+                        p.rangeMax = d["mx"].cast<float>();
+                    if (d.contains("sp"))
+                        p.speed = d["sp"].cast<float>();
+                    if (d.contains("sl"))
+                        p.slider = d["sl"].cast<bool>();
+                    if (d.contains("ml"))
+                        p.multiline = d["ml"].cast<bool>();
+                    if (d.contains("hdr"))
+                        p.header = d["hdr"].cast<std::string>();
+                    if (d.contains("spc"))
+                        p.space = d["spc"].cast<float>();
+                    props.push_back(std::move(p));
+                }
+
+                auto changes = ctx.RenderPropertyBatch(props, labelWidth);
+
+                // Convert changes to Python dict: {index: value}
+                py::dict result;
+                for (const auto &c : changes)
+                {
+                    py::int_ key(c.index);
+                    switch (c.type)
+                    {
+                    case PropertyDesc::Float:
+                        result[key] = py::float_(c.fVal[0]);
+                        break;
+                    case PropertyDesc::Int:
+                        result[key] = py::int_(c.iVal);
+                        break;
+                    case PropertyDesc::Bool:
+                        result[key] = py::bool_(c.bVal);
+                        break;
+                    case PropertyDesc::String:
+                        result[key] = py::str(c.sVal);
+                        break;
+                    case PropertyDesc::Vec2:
+                        result[key] = py::make_tuple(c.fVal[0], c.fVal[1]);
+                        break;
+                    case PropertyDesc::Vec3:
+                        result[key] = py::make_tuple(c.fVal[0], c.fVal[1], c.fVal[2]);
+                        break;
+                    case PropertyDesc::Vec4:
+                        result[key] = py::make_tuple(c.fVal[0], c.fVal[1], c.fVal[2], c.fVal[3]);
+                        break;
+                    case PropertyDesc::Enum:
+                        result[key] = py::int_(c.iVal);
+                        break;
+                    case PropertyDesc::Color:
+                        result[key] = py::make_tuple(c.fVal[0], c.fVal[1], c.fVal[2], c.fVal[3]);
+                        break;
+                    }
+                }
+                return result;
+            },
+            py::arg("descriptors"), py::arg("label_width"),
+            "Render a batch of property fields in one call. Returns {index: new_value} for changed fields.");
 
     py::class_<InxGUIRenderable, PyGUIRenderable, std::shared_ptr<InxGUIRenderable>>(m, "InxGUIRenderable",
                                                                                      py::dynamic_attr())

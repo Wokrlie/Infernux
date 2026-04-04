@@ -321,7 +321,9 @@ class GameViewPanel(EditorPanel):
         if pushed_fit_style:
             ctx.pop_style_color(1)
 
-        # ── FPS counter (right-aligned) ──
+        # ── FPS counter (right-aligned, Unity-style) ──
+        # Unity Stats: FPS = real wall-clock frame rate (scripts + physics +
+        # rendering + everything).  Frame ms = 1000 / FPS.
         dt = Time.unscaled_delta_time
         if dt > 0.0:
             self._fps_accum_time += dt

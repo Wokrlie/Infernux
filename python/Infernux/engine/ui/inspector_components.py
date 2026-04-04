@@ -26,6 +26,7 @@ from .inspector_utils import (
     get_enum_member_value as _get_enum_member_value,
     find_enum_index as _find_enum_index,
     DRAG_SPEED_DEFAULT, DRAG_SPEED_FINE, DRAG_SPEED_INT,
+    build_scalar_desc, is_batch_renderable,
 )
 from .theme import Theme, ImGuiCol
 
@@ -358,6 +359,9 @@ def render_builtin_via_setters(ctx: InxGUIContext, comp, wrapper_cls, *, skip_fi
     If *comp* is a raw C++ component, it is wrapped in a BuiltinComponent
     wrapper so that CppProperty converters (e.g. COLOR get/set) are applied.
 
+    Uses C++ batch property renderer for scalar fields to minimize pybind11
+    overhead.  Non-scalar fields (ASSET refs) are rendered individually.
+
     Args:
         skip_fields: Optional set of Python attribute names to skip.
     """
@@ -379,6 +383,20 @@ def render_builtin_via_setters(ctx: InxGUIContext, comp, wrapper_cls, *, skip_fi
     labels = [pretty_field_name(name) for name, _ in props]
     lw = max_label_w(ctx, labels)
 
+    # ── Batch-rendering state ──
+    batch_descs = []  # list of descriptor dicts for C++
+    batch_info = []   # parallel: (py_name, cpp_attr, metadata, current_value, enum_members)
+
+    def _flush_batch():
+        nonlocal batch_descs, batch_info
+        if not batch_descs:
+            return
+        changes = ctx.render_property_batch(batch_descs, lw)
+        if changes:
+            _apply_batch_changes_builtin(comp, changes, batch_info)
+        batch_descs = []
+        batch_info = []
+
     for py_name, cpp_prop in props:
         if skip_fields and py_name in skip_fields:
             continue
@@ -394,23 +412,18 @@ def render_builtin_via_setters(ctx: InxGUIContext, comp, wrapper_cls, *, skip_fi
             except (RuntimeError, TypeError):
                 pass  # On error, show the field
 
-        # Headers / spacing
-        if meta.header:
-            ctx.separator()
-            ctx.label(meta.header)
-        if meta.space and meta.space > 0:
-            ctx.dummy(0, meta.space)
-
         # Read current value from C++ component
         current = getattr(comp, cpp_attr)
 
         # Read-only fields: render as label and skip editing
         if meta.readonly:
+            _flush_batch()
             ctx.label(f"{py_name}: {current}")
             continue
 
         # ----- ASSET (AudioClip for built-in AudioSource.clip) -----
         if meta.field_type == FieldType.ASSET and cpp_attr == "clip":
+            _flush_batch()
             display_name = "None"
             if current is not None and hasattr(current, "name"):
                 try:
@@ -429,14 +442,46 @@ def render_builtin_via_setters(ctx: InxGUIContext, comp, wrapper_cls, *, skip_fi
             )
             continue
 
-        # ----- All scalar types via unified renderer -----
-        new_value = render_serialized_field(
-            ctx, f"##{py_name}", pretty_field_name(py_name), meta, current, lw,
-        )
+        # ----- Scalar field → try batch -----
+        hdr = ""
+        spc = 0.0
+        if meta.header:
+            hdr = meta.header
+        if meta.space and meta.space > 0:
+            spc = meta.space
 
-        if has_field_changed(meta.field_type, current, new_value):
-            _record_builtin_property(comp, cpp_attr, current, new_value,
-                                     f"Set {py_name}")
+        desc = build_scalar_desc(
+            f"##{py_name}", pretty_field_name(py_name), meta, current,
+            header_text=hdr, space_before=spc,
+        )
+        if desc is not None:
+            # Track enum members for index→member conversion on change
+            enum_members = None
+            if meta.field_type == FieldType.ENUM:
+                enum_cls = meta.enum_type
+                if isinstance(enum_cls, str):
+                    import Infernux.lib as _lib
+                    enum_cls = getattr(_lib, enum_cls, None)
+                if enum_cls is not None:
+                    enum_members = _get_enum_members(enum_cls)
+            batch_descs.append(desc)
+            batch_info.append((py_name, cpp_attr, meta, current, enum_members))
+        else:
+            # Non-batchable → flush + fallback to per-field render
+            _flush_batch()
+            if hdr:
+                ctx.separator()
+                ctx.label(hdr)
+            if spc > 0:
+                ctx.dummy(0, spc)
+            new_value = render_serialized_field(
+                ctx, f"##{py_name}", pretty_field_name(py_name), meta, current, lw,
+            )
+            if has_field_changed(meta.field_type, current, new_value):
+                _record_builtin_property(comp, cpp_attr, current, new_value,
+                                         f"Set {py_name}")
+
+    _flush_batch()
 
     # Append extra renderer if registered (e.g. AudioSource per-track section)
     extra = _COMPONENT_EXTRA_RENDERERS.get(getattr(comp, 'type_name', ''))
@@ -462,6 +507,48 @@ def _record_builtin_property(comp, cpp_attr: str, old_value, new_value,
     # Fallback — just set the property directly
     setattr(comp, cpp_attr, new_value)
     _notify_scene_modified()
+
+
+def _convert_batch_value(field_type, raw_value, enum_members):
+    """Convert a raw value from C++ batch renderer to the correct Python type."""
+    from Infernux.components.serialized_field import FieldType
+    if field_type == FieldType.VEC2:
+        from Infernux.lib import Vector2
+        return Vector2(raw_value[0], raw_value[1])
+    if field_type == FieldType.VEC3:
+        from Infernux.lib import Vector3
+        return Vector3(raw_value[0], raw_value[1], raw_value[2])
+    if field_type == FieldType.VEC4:
+        from Infernux.lib import vec4f
+        return vec4f(raw_value[0], raw_value[1], raw_value[2], raw_value[3])
+    if field_type == FieldType.ENUM and enum_members:
+        idx = int(raw_value)
+        if 0 <= idx < len(enum_members):
+            return enum_members[idx]
+    if field_type == FieldType.COLOR:
+        return [raw_value[0], raw_value[1], raw_value[2], raw_value[3]]
+    return raw_value
+
+
+def _apply_batch_changes_builtin(comp, changes: dict, batch_info: list):
+    """Apply changes from C++ batch renderer to a BuiltinComponent."""
+    for idx_key, raw_value in changes.items():
+        idx = int(idx_key)
+        py_name, cpp_attr, meta, old_value, enum_members = batch_info[idx]
+        new_value = _convert_batch_value(meta.field_type, raw_value, enum_members)
+        _record_builtin_property(comp, cpp_attr, old_value, new_value, f"Set {py_name}")
+
+
+def _apply_batch_changes_py(py_comp, changes: dict, batch_info: list):
+    """Apply changes from C++ batch renderer to a Python InxComponent."""
+    for idx_key, raw_value in changes.items():
+        idx = int(idx_key)
+        field_name, meta, old_value, enum_members = batch_info[idx]
+        new_value = _convert_batch_value(meta.field_type, raw_value, enum_members)
+        if has_field_changed(meta.field_type, old_value, new_value) and not meta.readonly:
+            _record_property(py_comp, field_name, old_value, new_value, f"Set {field_name}")
+            if hasattr(py_comp, '_call_on_validate'):
+                py_comp._call_on_validate()
 
 
 class _TrackVolumeCommand:
@@ -1202,6 +1289,9 @@ def render_py_component(ctx: InxGUIContext, py_comp):
     If a custom renderer is registered via ``register_py_component_renderer``,
     it is used instead of the generic field-based renderer.
 
+    Uses C++ batch property renderer for scalar fields to minimize pybind11
+    overhead.  Non-scalar fields are rendered individually.
+
     Supports:
     - ``group``: fields with the same group name are wrapped in a
       ``collapsing_header`` section.
@@ -1216,6 +1306,20 @@ def render_py_component(ctx: InxGUIContext, py_comp):
     fields = get_serialized_fields(py_comp.__class__)
     lw = max_label_w(ctx, [pretty_field_name(k) for k in fields]) if fields else 0.0
 
+    # ── Batch rendering state ──
+    batch_descs = []   # list of descriptor dicts for C++
+    batch_info = []    # parallel: (field_name, metadata, current_value, enum_members)
+
+    def _flush():
+        nonlocal batch_descs, batch_info
+        if not batch_descs:
+            return
+        changes = ctx.render_property_batch(batch_descs, lw)
+        if changes:
+            _apply_batch_changes_py(py_comp, changes, batch_info)
+        batch_descs = []
+        batch_info = []
+
     # Track which collapsible group is currently open so we can close it
     _current_group: str = ""
     _group_visible: bool = True
@@ -1224,6 +1328,7 @@ def render_py_component(ctx: InxGUIContext, py_comp):
         # ── Collapsible group management ──
         field_group = metadata.group or ""
         if field_group != _current_group:
+            _flush()
             _current_group = field_group
             if field_group:
                 _group_visible = render_compact_section_header(ctx, field_group, level="secondary")
@@ -1241,26 +1346,14 @@ def render_py_component(ctx: InxGUIContext, py_comp):
             except (RuntimeError, TypeError):
                 pass  # On error, show the field
 
-        # Add header if specified (simple label, NOT collapsible)
-        if metadata.header:
-            ctx.separator()
-            ctx.label(metadata.header)
-
-        # Add space if specified
-        if metadata.space > 0:
-            ctx.dummy(0, metadata.space)
-
         # Get current value. For reference-like fields, use the raw stored ref
         # so the Inspector keeps access to path_hint / missing-ref state.
+        _REF_TYPES = (
+            FieldType.GAME_OBJECT, FieldType.MATERIAL, FieldType.TEXTURE,
+            FieldType.SHADER, FieldType.ASSET, FieldType.COMPONENT,
+        )
         try:
-            if metadata.field_type in (
-                FieldType.GAME_OBJECT,
-                FieldType.MATERIAL,
-                FieldType.TEXTURE,
-                FieldType.SHADER,
-                FieldType.ASSET,
-                FieldType.COMPONENT,
-            ):
+            if metadata.field_type in _REF_TYPES:
                 from Infernux.components.serialized_field import get_raw_field_value
                 current_value = get_raw_field_value(py_comp, field_name)
             else:
@@ -1270,13 +1363,16 @@ def render_py_component(ctx: InxGUIContext, py_comp):
 
         # Readonly scalar fields: render as label, skip interactive widgets
         if metadata.readonly and metadata.field_type in (FieldType.INT, FieldType.FLOAT, FieldType.STRING, FieldType.BOOL):
+            _flush()
             field_label(ctx, pretty_field_name(field_name), lw)
             ctx.label(f"{current_value}")
             if metadata.tooltip and ctx.is_item_hovered():
                 ctx.set_tooltip(metadata.tooltip)
             continue
 
+        # ── Non-scalar types: flush batch, render individually ──
         if metadata.field_type == FieldType.LIST:
+            _flush()
             from Infernux.components.serialized_field import get_raw_field_value
             _raw_list = get_raw_field_value(py_comp, field_name)
             _render_list_field(ctx, py_comp, field_name, metadata, _raw_list, lw)
@@ -1286,8 +1382,8 @@ def render_py_component(ctx: InxGUIContext, py_comp):
                 _render_info_text(ctx, metadata.info_text)
             continue
 
-        # ── SerializableObject — inline collapsible section ──
         if metadata.field_type == FieldType.SERIALIZABLE_OBJECT:
+            _flush()
             _render_serializable_object_field(ctx, py_comp, field_name, metadata, current_value, lw)
             if metadata.tooltip and ctx.is_item_hovered():
                 ctx.set_tooltip(metadata.tooltip)
@@ -1295,8 +1391,8 @@ def render_py_component(ctx: InxGUIContext, py_comp):
                 _render_info_text(ctx, metadata.info_text)
             continue
 
-        # ── ComponentRef — object field with component type filtering ──
         if metadata.field_type == FieldType.COMPONENT:
+            _flush()
             from Infernux.components.ref_wrappers import ComponentRef
             from Infernux.components.serialized_field import get_raw_field_value
             _comp_ref = get_raw_field_value(py_comp, field_name)
@@ -1334,8 +1430,8 @@ def render_py_component(ctx: InxGUIContext, py_comp):
                 _render_info_text(ctx, metadata.info_text)
             continue
 
-        # ── Reference types need context-specific callbacks — handle separately ──
         if metadata.field_type == FieldType.GAME_OBJECT:
+            _flush()
             from Infernux.components.ref_wrappers import PrefabRef
             if isinstance(current_value, PrefabRef):
                 display = current_value.name
@@ -1373,16 +1469,51 @@ def render_py_component(ctx: InxGUIContext, py_comp):
                 on_pick=_go_on_pick,
                 on_clear=_go_on_clear,
             )
+            if metadata.tooltip and ctx.is_item_hovered():
+                ctx.set_tooltip(metadata.tooltip)
+            if metadata.info_text:
+                _render_info_text(ctx, metadata.info_text)
+            continue
 
-        elif metadata.field_type in _get_asset_ref_config():
+        if metadata.field_type in _get_asset_ref_config():
+            _flush()
             _render_asset_reference_field(ctx, py_comp, field_name, metadata, current_value, metadata.field_type, lw)
+            if metadata.tooltip and ctx.is_item_hovered():
+                ctx.set_tooltip(metadata.tooltip)
+            if metadata.info_text:
+                _render_info_text(ctx, metadata.info_text)
+            continue
 
+        # ── Scalar field → try batch ──
+        hdr = metadata.header or ""
+        spc = metadata.space if metadata.space and metadata.space > 0 else 0.0
+
+        desc = build_scalar_desc(
+            f"##{field_name}", pretty_field_name(field_name), metadata, current_value,
+            header_text=hdr, space_before=spc,
+        )
+        if desc is not None:
+            enum_members = None
+            if metadata.field_type == FieldType.ENUM:
+                enum_cls = metadata.enum_type
+                if isinstance(enum_cls, str):
+                    import Infernux.lib as _lib
+                    enum_cls = getattr(_lib, enum_cls, None)
+                if enum_cls is not None:
+                    enum_members = _get_enum_members(enum_cls)
+            batch_descs.append(desc)
+            batch_info.append((field_name, metadata, current_value, enum_members))
         else:
-            # ── All scalar types via unified renderer ──
+            # Non-batchable scalar fallback
+            _flush()
+            if hdr:
+                ctx.separator()
+                ctx.label(hdr)
+            if spc > 0:
+                ctx.dummy(0, spc)
             new_value = render_serialized_field(
                 ctx, f"##{field_name}", pretty_field_name(field_name), metadata, current_value, lw,
             )
-
             if has_field_changed(metadata.field_type, current_value, new_value) and not metadata.readonly:
                 _record_property(py_comp, field_name, current_value, new_value, f"Set {field_name}")
                 if hasattr(py_comp, '_call_on_validate'):
@@ -1396,8 +1527,7 @@ def render_py_component(ctx: InxGUIContext, py_comp):
         if metadata.info_text:
             _render_info_text(ctx, metadata.info_text)
 
-
-
+    _flush()
 def _apply_reference_drop(field_type, comp, field_name: str, payload, required_component: str = None):
     """Generic handler for reference-type drag-drop onto a field.
 

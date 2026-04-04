@@ -544,6 +544,16 @@ class Engine():
         if self._engine:
             self._engine.set_game_camera_enabled(enabled)
 
+    def get_last_game_render_ms(self) -> float:
+        """Get last frame's game view render time (CPU command recording) in ms.
+
+        Measures ONLY the game camera render pipeline, excluding editor panels,
+        scene view, etc.  Use this for a game-only FPS counter.
+        """
+        if self._engine:
+            return self._engine.get_last_game_render_ms()
+        return 0.0
+
     def get_screen_ui_renderer(self):
         """Get the GPU screen-space UI renderer (None before game RT init)."""
         if self._engine:

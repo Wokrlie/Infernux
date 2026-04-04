@@ -60,6 +60,10 @@ void InxView::ProcessEvent()
     // ====================================================================
     m_idling.isIdling = false;
 
+    FramePacingSample pacing{};
+    pacing.playModeBypass = m_isPlayMode;
+    pacing.cooldownRemaining = m_activeFramesRemaining;
+
     SDL_Event firstEvent{};
     bool gotFirstEvent = false;
 
@@ -67,24 +71,41 @@ void InxView::ProcessEvent()
         bool isIdle = m_idling.enableIdling && m_idling.fpsIdle > 0.0f && m_activeFramesRemaining <= 0;
         float targetFps = isIdle ? m_idling.fpsIdle : m_idling.editorFpsCap;
 
+        pacing.idleMode = isIdle;
+        pacing.targetFps = targetFps;
+
         if (targetFps > 0.0f) {
             auto now = std::chrono::steady_clock::now();
             double elapsed = std::chrono::duration<double>(now - m_lastFrameStart).count();
             double budget = 1.0 / static_cast<double>(targetFps);
-            int sleepMs = static_cast<int>((budget - elapsed) * 1000.0);
+            double requestedSleepMs = (budget - elapsed) * 1000.0;
+            int sleepMs = static_cast<int>(requestedSleepMs);
+
+            pacing.elapsedBeforeSleepMs = elapsed * 1000.0;
+            pacing.frameBudgetMs = budget * 1000.0;
+            pacing.requestedSleepMs = requestedSleepMs > 0.0 ? requestedSleepMs : 0.0;
 
             if (sleepMs > 0) {
                 if (isIdle) {
                     // Idle: block until an event arrives OR the timeout expires.
                     // A real event struct is used so the event data is preserved.
+                    auto sleepStart = std::chrono::steady_clock::now();
                     gotFirstEvent = SDL_WaitEventTimeout(&firstEvent, sleepMs);
 
-                    auto afterWait = std::chrono::steady_clock::now();
-                    double waitSec = std::chrono::duration<double>(afterWait - now).count();
-                    m_idling.isIdling = (waitSec > budget * 0.9);
+                    auto sleepEnd = std::chrono::steady_clock::now();
+                    double actualSleepMs = std::chrono::duration<double, std::milli>(sleepEnd - sleepStart).count();
+                    pacing.slept = true;
+                    pacing.wokeByEvent = gotFirstEvent;
+                    pacing.actualSleepMs = actualSleepMs;
+
+                    m_idling.isIdling = (actualSleepMs > pacing.frameBudgetMs * 0.9);
                 } else {
                     // Active editor: hard sleep for the remaining frame budget.
+                    auto sleepStart = std::chrono::steady_clock::now();
                     SDL_Delay(sleepMs);
+                    auto sleepEnd = std::chrono::steady_clock::now();
+                    pacing.slept = true;
+                    pacing.actualSleepMs = std::chrono::duration<double, std::milli>(sleepEnd - sleepStart).count();
                 }
             }
         }
@@ -136,7 +157,9 @@ void InxView::ProcessEvent()
         if (e.type == SDL_EVENT_WINDOW_RESTORED || e.type == SDL_EVENT_WINDOW_EXPOSED ||
             e.type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
             m_isMinimized = false;
-            hadInputEvent = true;
+            if (e.type != SDL_EVENT_WINDOW_EXPOSED) {
+                hadInputEvent = true;
+            }
         }
         if (e.type == SDL_EVENT_WINDOW_OCCLUDED) {
             m_isMinimized = true;
@@ -145,6 +168,29 @@ void InxView::ProcessEvent()
 
     // Process the event captured by SDL_WaitEventTimeout (if any)
     if (gotFirstEvent) {
+        switch (firstEvent.type) {
+        case SDL_EVENT_MOUSE_MOTION:
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+        case SDL_EVENT_MOUSE_WHEEL:
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP:
+        case SDL_EVENT_TEXT_INPUT:
+        case SDL_EVENT_DROP_FILE:
+        case SDL_EVENT_DROP_TEXT:
+            pacing.wokeByInputEvent = true;
+            break;
+        case SDL_EVENT_WINDOW_MINIMIZED:
+        case SDL_EVENT_WINDOW_RESTORED:
+        case SDL_EVENT_WINDOW_EXPOSED:
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        case SDL_EVENT_WINDOW_OCCLUDED:
+            pacing.wokeByWindowEvent = true;
+            break;
+        default:
+            pacing.wokeByOtherEvent = true;
+            break;
+        }
         processOneEvent(firstEvent);
     }
 
@@ -162,6 +208,10 @@ void InxView::ProcessEvent()
     } else if (m_activeFramesRemaining > 0) {
         --m_activeFramesRemaining;
     }
+
+    pacing.hadInputEvent = hadInputEvent;
+    pacing.cooldownRemaining = m_activeFramesRemaining;
+    m_lastPacingSample = pacing;
 
     SDL_GetWindowSize(m_window, &m_windowWidth, &m_windowHeight);
 }

@@ -9,7 +9,7 @@ from __future__ import annotations
 from Infernux.lib import MenuBarPanel as MenuBarPanel
 from Infernux.engine.ui.closable_panel import ClosablePanel as ClosablePanel
 from Infernux.lib import HierarchyPanel as HierarchyPanel
-from Infernux.engine.ui.inspector_panel import InspectorPanel as InspectorPanel
+from Infernux.lib import InspectorPanel as InspectorPanel
 from Infernux.lib import ConsolePanel as ConsolePanel
 from Infernux.engine.ui.scene_view_panel import SceneViewPanel as SceneViewPanel
 from Infernux.engine.ui.game_view_panel import GameViewPanel as GameViewPanel

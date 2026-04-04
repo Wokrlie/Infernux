@@ -204,7 +204,7 @@ def _get_current_selection_ids() -> List[int]:
 def _bump_inspector_structure():
     """Bump Inspector component-structure version so its cache invalidates."""
     try:
-        from Infernux.engine.ui.inspector_panel import bump_component_structure_version
+        from Infernux.engine.ui.inspector_support import bump_component_structure_version
         bump_component_structure_version()
     except ImportError:
         pass

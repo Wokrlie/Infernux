@@ -767,3 +767,143 @@ def render_apply_revert(
         ctx.button("Revert", None)
         ctx.end_disabled()
     return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Batch property descriptor builder (for C++ RenderPropertyBatch)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Must match PropertyDesc::Type enum in InxGUIContext.h
+PROP_FLOAT  = 0
+PROP_INT    = 1
+PROP_BOOL   = 2
+PROP_STRING = 3
+PROP_VEC2   = 4
+PROP_VEC3   = 5
+PROP_VEC4   = 6
+PROP_ENUM   = 7
+PROP_COLOR  = 8
+
+_FIELD_TYPE_TO_PROP = None  # lazy init
+
+
+def _ensure_prop_map():
+    global _FIELD_TYPE_TO_PROP
+    if _FIELD_TYPE_TO_PROP is not None:
+        return
+    from Infernux.components.serialized_field import FieldType
+    _FIELD_TYPE_TO_PROP = {
+        FieldType.FLOAT:  PROP_FLOAT,
+        FieldType.INT:    PROP_INT,
+        FieldType.BOOL:   PROP_BOOL,
+        FieldType.STRING: PROP_STRING,
+        FieldType.VEC2:   PROP_VEC2,
+        FieldType.VEC3:   PROP_VEC3,
+        FieldType.VEC4:   PROP_VEC4,
+        FieldType.ENUM:   PROP_ENUM,
+        FieldType.COLOR:  PROP_COLOR,
+    }
+
+
+def is_batch_renderable(field_type) -> bool:
+    """Return True if this FieldType can be handled by C++ batch renderer."""
+    _ensure_prop_map()
+    return field_type in _FIELD_TYPE_TO_PROP
+
+
+def build_scalar_desc(
+    wid: str,
+    display_name: str,
+    metadata,
+    current_value,
+    *,
+    header_text: str = "",
+    space_before: float = 0,
+) -> dict | None:
+    """Build a single property descriptor dict for the C++ batch renderer.
+
+    Returns None if the field type is not batch-renderable (references, lists, etc.).
+    """
+    _ensure_prop_map()
+    prop_type = _FIELD_TYPE_TO_PROP.get(metadata.field_type)
+    if prop_type is None:
+        return None
+
+    desc = {"t": prop_type, "w": wid, "n": display_name}
+
+    # --- Value ---
+    if prop_type == PROP_FLOAT:
+        desc["f"] = float(current_value) if current_value is not None else 0.0
+    elif prop_type == PROP_INT:
+        desc["i"] = int(current_value) if current_value is not None else 0
+    elif prop_type == PROP_BOOL:
+        desc["b"] = bool(current_value) if current_value is not None else False
+    elif prop_type == PROP_STRING:
+        desc["s"] = str(current_value) if current_value else ""
+    elif prop_type == PROP_VEC2:
+        if current_value is not None:
+            desc["f"] = float(current_value.x)
+            desc["f2"] = float(current_value.y)
+        else:
+            desc["f"] = 0.0; desc["f2"] = 0.0
+    elif prop_type == PROP_VEC3:
+        if current_value is not None:
+            desc["f"] = float(current_value.x)
+            desc["f2"] = float(current_value.y)
+            desc["f3"] = float(current_value.z)
+        else:
+            desc["f"] = 0.0; desc["f2"] = 0.0; desc["f3"] = 0.0
+    elif prop_type == PROP_VEC4:
+        if current_value is not None:
+            desc["f"] = float(current_value.x)
+            desc["f2"] = float(current_value.y)
+            desc["f3"] = float(current_value.z)
+            desc["f4"] = float(current_value.w)
+        else:
+            desc["f"] = 0.0; desc["f2"] = 0.0; desc["f3"] = 0.0; desc["f4"] = 0.0
+    elif prop_type == PROP_ENUM:
+        enum_cls = metadata.enum_type
+        if isinstance(enum_cls, str):
+            import Infernux.lib as _lib
+            enum_cls = getattr(_lib, enum_cls, None)
+        if enum_cls is not None:
+            members = get_enum_members(enum_cls)
+            if hasattr(metadata, "enum_labels") and metadata.enum_labels and len(metadata.enum_labels) == len(members):
+                desc["en"] = metadata.enum_labels
+            else:
+                desc["en"] = [get_enum_member_name(m) for m in members]
+            desc["ei"] = find_enum_index(members, current_value)
+        else:
+            return None  # can't render without enum info
+    elif prop_type == PROP_COLOR:
+        if current_value is not None:
+            desc["f"] = float(current_value[0])
+            desc["f2"] = float(current_value[1])
+            desc["f3"] = float(current_value[2])
+            desc["f4"] = float(current_value[3])
+        else:
+            desc["f"] = 1.0; desc["f2"] = 1.0; desc["f3"] = 1.0; desc["f4"] = 1.0
+
+    # --- Metadata ---
+    if metadata.range:
+        desc["mn"] = float(metadata.range[0])
+        desc["mx"] = float(metadata.range[1])
+    speed = getattr(metadata, "drag_speed", None)
+    if speed is not None:
+        desc["sp"] = float(speed)
+    elif prop_type == PROP_INT:
+        desc["sp"] = DRAG_SPEED_INT
+    elif prop_type == PROP_FLOAT:
+        desc["sp"] = DRAG_SPEED_DEFAULT
+    if getattr(metadata, "slider", False):
+        desc["sl"] = True
+    if getattr(metadata, "multiline", False):
+        desc["ml"] = True
+
+    # --- Layout ---
+    if header_text:
+        desc["hdr"] = header_text
+    if space_before > 0:
+        desc["spc"] = space_before
+
+    return desc

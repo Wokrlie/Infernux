@@ -8,7 +8,7 @@ if not _os.environ.get("_INFERNUX_PLAYER_MODE"):
     from Infernux.lib import MenuBarPanel
     from .closable_panel import ClosablePanel
     from Infernux.lib import HierarchyPanel
-    from .inspector_panel import InspectorPanel
+    from Infernux.lib import InspectorPanel
     from Infernux.lib import ConsolePanel
     from .scene_view_panel import SceneViewPanel
     from .game_view_panel import GameViewPanel

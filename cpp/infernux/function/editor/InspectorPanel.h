@@ -175,6 +175,8 @@ class InspectorPanel : public EditorPanel
 
     std::function<void(const std::string &)> openWindow;
 
+    std::unordered_map<std::string, double> ConsumeSubTimings() override;
+
   protected:
     void OnRenderContent(InxGUIContext *ctx) override;
     void PreRender(InxGUIContext *ctx) override;
@@ -211,7 +213,12 @@ class InspectorPanel : public EditorPanel
 
     // ── Timing ───────────────────────────────────────────────────────
     float m_frameTimeNow = 0.0f;
-
+    // ── Split sub-timings (accumulated ms, consumed by profile) ───
+    double m_subGetInfo = 0.0;
+    double m_subTransform = 0.0;
+    double m_subGetComponents = 0.0;
+    double m_subComponentBodies = 0.0;
+    double m_subMaterials = 0.0;
     // ── Cached object info ───────────────────────────────────────────
     uint64_t m_cachedObjInfoId = 0;
     ObjectInfo m_cachedObjInfo;

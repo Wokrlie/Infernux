@@ -218,10 +218,20 @@ class EditorBootstrap:
         engine = self.engine
         project_path = self.project_path
 
+        from Infernux.lib import InspectorPanel as NativeInspectorPanel
+
+        wm.register_window_type(
+            type_id="inspector",
+            window_class=NativeInspectorPanel,
+            display_name="Inspector",
+            factory=self._create_native_inspector,
+            singleton=True,
+            title_key="panel.inspector",
+        )
+
         # Override factories for panels that need runtime dependencies.
         # Panels with no-arg constructors use the default factory (cls()).
         _factories = {
-            "inspector":          lambda: self._create_native_inspector(),
             "scene_view":         lambda: SceneViewPanel(engine=engine),
             "game_view":          lambda: GameViewPanel(engine=engine),
             "project":            lambda: self._create_native_project_panel(),
@@ -1456,7 +1466,7 @@ class EditorBootstrap:
         ip = self.inspector_panel
         engine = self.engine
         from Infernux.engine.i18n import t as _t
-        from Infernux.engine.ui import inspector_panel as _legacy_inspector_panel
+        from Infernux.engine.ui import inspector_support as _inspector_support
 
         # ── Translation ────────────────────────────────────────────────
         ip.translate = _t
@@ -1478,6 +1488,20 @@ class EditorBootstrap:
             "native_map": {},
             "py_map": {},
         }
+        _material_section_cache = {
+            "object_id": 0,
+            "scene_version": -1,
+            "structure_version": -1,
+            "signature": (),
+            "entries": [],
+        }
+
+        def _invalidate_material_section_cache():
+            _material_section_cache["object_id"] = 0
+            _material_section_cache["scene_version"] = -1
+            _material_section_cache["structure_version"] = -1
+            _material_section_cache["signature"] = ()
+            _material_section_cache["entries"] = []
 
         def _invalidate_component_cache():
             _component_cache["object_id"] = 0
@@ -1486,11 +1510,12 @@ class EditorBootstrap:
             _component_cache["items"] = []
             _component_cache["native_map"] = {}
             _component_cache["py_map"] = {}
+            _invalidate_material_section_cache()
 
         def _current_scene_and_versions():
             scene = SceneManager.instance().get_active_scene()
             scene_version = getattr(scene, 'structure_version', -1) if scene else -1
-            structure_version = getattr(_legacy_inspector_panel, '_component_structure_version', 0)
+            structure_version = _inspector_support.get_component_structure_version()
             return scene, scene_version, structure_version
 
         def _get_component_payload(obj_id):
@@ -1571,8 +1596,18 @@ class EditorBootstrap:
             _component_cache["py_map"] = py_map
             return scene, items, native_map, py_map
 
+        def _get_cached_component_maps(obj_id):
+            scene, scene_version, structure_version = _current_scene_and_versions()
+            if (
+                _component_cache["object_id"] == obj_id
+                and _component_cache["scene_version"] == scene_version
+                and _component_cache["structure_version"] == structure_version
+            ):
+                return scene, _component_cache["items"], _component_cache["native_map"], _component_cache["py_map"]
+            return _get_component_payload(obj_id)
+
         def _resolve_component(obj_id, comp_id, is_native):
-            _scene, _items, native_map, py_map = _get_component_payload(obj_id)
+            _scene, _items, native_map, py_map = _get_cached_component_maps(obj_id)
             if is_native:
                 return native_map.get(comp_id)
             return py_map.get(comp_id)
@@ -1706,8 +1741,7 @@ class EditorBootstrap:
                 icon_path = os.path.join(icons_dir, fname)
                 tex_data = TextureLoader.load_from_file(icon_path)
                 if tex_data and tex_data.is_valid():
-                    from Infernux.engine.ui.inspector_panel import _prepare_component_icon_pixels
-                    pixels, w, h = _prepare_component_icon_pixels(tex_data)
+                    pixels, w, h = _inspector_support.prepare_component_icon_pixels(tex_data)
                     if w > 0 and h > 0:
                         tid = native_engine.upload_texture_for_imgui(tex_name, pixels, w, h)
                         if tid != 0:
@@ -2057,7 +2091,7 @@ class EditorBootstrap:
                     return engine.get_native_engine()
 
                 def _ensure_material_file_path(self, material):
-                    return _legacy_inspector_panel.InspectorPanel._ensure_material_file_path(material)
+                    return _inspector_support.ensure_material_file_path(material)
 
                 def _sync_back(self):
                     _inline_material_state["cache"] = self._inline_material_cache
@@ -2071,23 +2105,41 @@ class EditorBootstrap:
             from Infernux.engine.ui.inspector_utils import render_compact_section_header, render_info_text
             from Infernux.engine.ui.theme import Theme, ImGuiCol, ImGuiStyleVar
 
-            scene = SceneManager.instance().get_active_scene()
+            scene, items, native_map, _py_map = _get_cached_component_maps(obj_id)
             obj = scene.find_by_id(obj_id) if scene else None
             if obj is None:
                 return
 
             wrapper_cls = BuiltinComponent._builtin_registry.get("MeshRenderer")
             renderers = []
-            for comp in (obj.get_components() or []):
-                if getattr(comp, 'type_name', '') != "MeshRenderer":
+            signature_parts = []
+            for item in items:
+                if not item.is_native or item.type_name != "MeshRenderer":
                     continue
-                renderer = comp
+                renderer = native_map.get(item.component_id)
+                if renderer is None:
+                    continue
                 if wrapper_cls is not None and not isinstance(renderer, BuiltinComponent):
                     try:
                         renderer = wrapper_cls._get_or_create_wrapper(renderer, obj)
                     except Exception:
-                        renderer = comp
-                renderers.append(renderer)
+                        pass
+                mat_count = getattr(renderer, 'material_count', 0) or 1
+                try:
+                    material_guids = tuple(renderer.get_material_guids() or [])
+                except Exception:
+                    material_guids = ()
+                try:
+                    slot_names = tuple(renderer.get_material_slot_names() or [])
+                except Exception:
+                    slot_names = ()
+                renderers.append((renderer, mat_count, material_guids, slot_names))
+                signature_parts.append((
+                    getattr(renderer, 'component_id', id(renderer)),
+                    mat_count,
+                    material_guids,
+                    slot_names,
+                ))
 
             if not renderers:
                 return
@@ -2103,38 +2155,43 @@ class EditorBootstrap:
             ):
                 return
 
-            valid_entries = []
+            _scene, scene_version, structure_version = _current_scene_and_versions()
+            signature = tuple(signature_parts)
+            if (
+                _material_section_cache["object_id"] == obj_id
+                and _material_section_cache["scene_version"] == scene_version
+                and _material_section_cache["structure_version"] == structure_version
+                and _material_section_cache["signature"] == signature
+            ):
+                valid_entries = _material_section_cache["entries"]
+            else:
+                valid_entries = []
+                for renderer, mat_count, material_guids, slot_names in renderers:
+                    for slot_idx in range(mat_count):
+                        try:
+                            mat = renderer.get_effective_material(slot_idx)
+                        except Exception:
+                            mat = None
+                        if mat is None:
+                            continue
+                        if slot_idx < len(slot_names) and slot_names[slot_idx]:
+                            label = f"{slot_names[slot_idx]} (Slot {slot_idx})"
+                        else:
+                            label = f"Element {slot_idx}"
+                        is_default = slot_idx >= len(material_guids) or not material_guids[slot_idx]
+                        valid_entries.append({
+                            "label": label,
+                            "material": mat,
+                            "is_default": is_default,
+                        })
+                _material_section_cache["object_id"] = obj_id
+                _material_section_cache["scene_version"] = scene_version
+                _material_section_cache["structure_version"] = structure_version
+                _material_section_cache["signature"] = signature
+                _material_section_cache["entries"] = valid_entries
+
             owner_name = getattr(obj, 'name', '') or ''
             multiple_renderers = len(renderers) > 1
-            for renderer in renderers:
-                try:
-                    slot_names = list(renderer.get_material_slot_names() or [])
-                except Exception:
-                    slot_names = []
-                try:
-                    material_guids = list(renderer.get_material_guids() or [])
-                except Exception:
-                    material_guids = []
-                mat_count = getattr(renderer, 'material_count', 0) or 1
-                for slot_idx in range(mat_count):
-                    try:
-                        mat = renderer.get_effective_material(slot_idx)
-                    except Exception:
-                        mat = None
-                    if mat is None:
-                        continue
-                    if slot_idx < len(slot_names) and slot_names[slot_idx]:
-                        label = f"{slot_names[slot_idx]} (Slot {slot_idx})"
-                    else:
-                        label = f"Element {slot_idx}"
-                    is_default = slot_idx >= len(material_guids) or not material_guids[slot_idx]
-                    valid_entries.append({
-                        "label": label,
-                        "material": mat,
-                        "owner_name": owner_name,
-                        "is_default": is_default,
-                        "multiple_renderers": multiple_renderers,
-                    })
 
             if not valid_entries:
                 return
@@ -2143,8 +2200,8 @@ class EditorBootstrap:
             ctx.push_style_var_vec2(ImGuiStyleVar.ItemSpacing, *Theme.INSPECTOR_ITEM_SPC)
             for index, entry in enumerate(valid_entries):
                 title = entry["label"]
-                if entry["multiple_renderers"] and entry["owner_name"]:
-                    title = f"{entry['owner_name']} / {title}"
+                if multiple_renderers and owner_name:
+                    title = f"{owner_name} / {title}"
                 if not render_compact_section_header(
                     ctx, f"{title}##mat_entry_{index}", level="secondary", default_open=True
                 ):
@@ -2218,14 +2275,6 @@ class EditorBootstrap:
                 revert_prefab_overrides(obj)
 
         ip.prefab_action = _prefab_action
-
-        # ── Undo ───────────────────────────────────────────────────────
-        from Infernux.engine.undo import InspectorUndoTracker
-        _undo_tracker = InspectorUndoTracker()
-
-        ip.undo_begin_frame = _undo_tracker.begin_frame
-        ip.undo_end_frame = _undo_tracker.end_frame
-        ip.undo_invalidate_all = _undo_tracker.invalidate_all
 
         # ── Tags & Layers ──────────────────────────────────────────────
         from Infernux.lib import TagLayerManager

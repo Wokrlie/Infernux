@@ -12,6 +12,50 @@ struct SDL_Window;
 namespace infernux
 {
 
+// ── Property batch rendering ────────────────────────────────────────────
+// Python builds a list of PropertyDesc, C++ renders all widgets in one call.
+
+struct PropertyDesc
+{
+    enum Type : uint8_t
+    {
+        Float = 0,
+        Int = 1,
+        Bool = 2,
+        String = 3,
+        Vec2 = 4,
+        Vec3 = 5,
+        Vec4 = 6,
+        Enum = 7,
+        Color = 8
+    };
+    Type type = Float;
+    std::string widgetId;
+    std::string label;
+    float fVal[4] = {0, 0, 0, 0}; // Float or vector x/y/z/w
+    int iVal = 0;                  // Int or enum index
+    bool bVal = false;             // Bool
+    std::string sVal;              // String value
+    float rangeMin = -1e6f;
+    float rangeMax = 1e6f;
+    float speed = 0.1f;
+    bool slider = false;
+    bool multiline = false;
+    std::vector<std::string> enumNames;
+    std::string header; // Section header text above this field (empty = none)
+    float space = 0;    // Vertical padding before this field
+};
+
+struct PropertyChange
+{
+    int index;
+    PropertyDesc::Type type;
+    float fVal[4] = {0, 0, 0, 0};
+    int iVal = 0;
+    bool bVal = false;
+    std::string sVal;
+};
+
 class InxGUIContext
 {
   public:
@@ -283,6 +327,9 @@ class InxGUIContext
     /* draw list clip rect (for custom clipping of draw primitives) */
     void PushDrawListClipRect(float minX, float minY, float maxX, float maxY, bool intersectWithCurrent = true);
     void PopDrawListClipRect();
+
+    /* batch property rendering — renders all scalar fields in one call */
+    std::vector<PropertyChange> RenderPropertyBatch(const std::vector<PropertyDesc> &descriptors, float labelWidth);
 
   private:
     // Infinite-drag helper: warps cursor to opposite screen edge when it

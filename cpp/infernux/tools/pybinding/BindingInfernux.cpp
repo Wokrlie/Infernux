@@ -574,6 +574,13 @@ PYBIND11_MODULE(_Infernux, m)
             },
             "Check if game camera rendering is enabled")
         .def(
+            "get_last_game_render_ms",
+            [](Infernux &self) -> double {
+                auto *r = self.GetRenderer();
+                return r ? r->GetLastGameRenderMs() : 0.0;
+            },
+            "Get last frame's game view render time (CPU command recording) in ms, excluding editor panels")
+        .def(
             "get_screen_ui_renderer",
             [](Infernux &self) -> InxScreenUIRenderer * {
                 auto *r = self.GetRenderer();

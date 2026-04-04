@@ -93,6 +93,9 @@ class Engine:
     def set_game_camera_enabled(self, enabled: bool) -> None:
         """Enable or disable the game camera rendering."""
         ...
+    def get_last_game_render_ms(self) -> float:
+        """Get last frame's game view render time in ms (game camera pipeline only)."""
+        ...
     def get_screen_ui_renderer(self) -> Any:
         """Get the screen UI renderer instance."""
         ...

@@ -1292,4 +1292,222 @@ void InxGUIContext::PopDrawListClipRect()
         drawList->PopClipRect();
 }
 
+// ═════════════════════════════════════════════════════════════════════════
+//  Batch property renderer
+// ═════════════════════════════════════════════════════════════════════════
+
+std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector<PropertyDesc> &descriptors,
+                                                               float labelWidth)
+{
+    std::vector<PropertyChange> changes;
+
+    // Checkbox styling constants (match EditorTheme)
+    constexpr ImVec2 kCheckboxPad{4.0f, 2.0f};
+    constexpr float kCheckboxFontScale = 1.0f;
+    constexpr float kMinLabelWidth = 156.0f;
+
+    auto doLabel = [&](const std::string &label) {
+        if (!label.empty())
+        {
+            float w = labelWidth;
+            if (w <= 0.0f)
+                w = std::max(ImGui::CalcTextSize(label.c_str()).x + 18.0f, kMinLabelWidth);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(label.c_str());
+            ImGui::SameLine(w);
+            ImGui::SetNextItemWidth(-1);
+        }
+        else
+        {
+            ImGui::SetNextItemWidth(-1);
+        }
+    };
+
+    const int count = static_cast<int>(descriptors.size());
+    for (int i = 0; i < count; ++i)
+    {
+        const auto &d = descriptors[i];
+
+        // Layout: header / space
+        if (!d.header.empty())
+        {
+            ImGui::Spacing();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(d.header.c_str());
+        }
+        if (d.space > 0)
+            ImGui::Dummy(ImVec2(0, d.space));
+
+        switch (d.type)
+        {
+        case PropertyDesc::Float: {
+            doLabel(d.label);
+            float val = d.fVal[0];
+            float orig = val;
+            CompensateWarp();
+            if (d.slider && d.rangeMin > -1e5f)
+                ImGui::SliderFloat(d.widgetId.c_str(), &val, d.rangeMin, d.rangeMax);
+            else
+                ImGui::DragFloat(d.widgetId.c_str(), &val, d.speed, d.rangeMin, d.rangeMax);
+            HandleDragCapture();
+            if (val != orig)
+            {
+                PropertyChange c;
+                c.index = i;
+                c.type = PropertyDesc::Float;
+                c.fVal[0] = val;
+                changes.push_back(c);
+            }
+            break;
+        }
+        case PropertyDesc::Int: {
+            doLabel(d.label);
+            int val = d.iVal;
+            int orig = val;
+            CompensateWarp();
+            if (d.slider && static_cast<int>(d.rangeMin) > -1000000)
+                ImGui::SliderInt(d.widgetId.c_str(), &val, static_cast<int>(d.rangeMin),
+                                 static_cast<int>(d.rangeMax));
+            else
+                ImGui::DragInt(d.widgetId.c_str(), &val, d.speed, static_cast<int>(d.rangeMin),
+                               static_cast<int>(d.rangeMax));
+            HandleDragCapture();
+            if (val != orig)
+            {
+                PropertyChange c;
+                c.index = i;
+                c.type = PropertyDesc::Int;
+                c.iVal = val;
+                changes.push_back(c);
+            }
+            break;
+        }
+        case PropertyDesc::Bool: {
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, kCheckboxPad);
+            ImGui::SetWindowFontScale(kCheckboxFontScale);
+            bool val = d.bVal;
+            bool orig = val;
+            std::string cbLabel = !d.label.empty() ? d.label : d.widgetId;
+            ImGui::Checkbox(cbLabel.c_str(), &val);
+            ImGui::SetWindowFontScale(1.0f);
+            ImGui::PopStyleVar(1);
+            if (val != orig)
+            {
+                PropertyChange c;
+                c.index = i;
+                c.type = PropertyDesc::Bool;
+                c.bVal = val;
+                changes.push_back(c);
+            }
+            break;
+        }
+        case PropertyDesc::String: {
+            doLabel(d.label);
+            char buf[4096];
+            size_t len = std::min(d.sVal.size(), sizeof(buf) - 1);
+            std::memcpy(buf, d.sVal.c_str(), len);
+            buf[len] = '\0';
+            if (d.multiline)
+                ImGui::InputTextMultiline(d.widgetId.c_str(), buf, sizeof(buf), ImVec2(-1, 80));
+            else
+                ImGui::InputText(d.widgetId.c_str(), buf, 256);
+            std::string newStr(buf);
+            if (newStr != d.sVal)
+            {
+                PropertyChange c;
+                c.index = i;
+                c.type = PropertyDesc::String;
+                c.sVal = std::move(newStr);
+                changes.push_back(c);
+            }
+            break;
+        }
+        case PropertyDesc::Vec2: {
+            float v[2] = {d.fVal[0], d.fVal[1]};
+            float lw = d.label.empty() ? 1.0f : labelWidth;
+            Vector2Control(d.label.empty() ? " " : d.label, v, d.speed, lw);
+            if (v[0] != d.fVal[0] || v[1] != d.fVal[1])
+            {
+                PropertyChange c;
+                c.index = i;
+                c.type = PropertyDesc::Vec2;
+                c.fVal[0] = v[0];
+                c.fVal[1] = v[1];
+                changes.push_back(c);
+            }
+            break;
+        }
+        case PropertyDesc::Vec3: {
+            float v[3] = {d.fVal[0], d.fVal[1], d.fVal[2]};
+            float lw = d.label.empty() ? 1.0f : labelWidth;
+            Vector3Control(d.label.empty() ? " " : d.label, v, d.speed, lw);
+            if (v[0] != d.fVal[0] || v[1] != d.fVal[1] || v[2] != d.fVal[2])
+            {
+                PropertyChange c;
+                c.index = i;
+                c.type = PropertyDesc::Vec3;
+                c.fVal[0] = v[0];
+                c.fVal[1] = v[1];
+                c.fVal[2] = v[2];
+                changes.push_back(c);
+            }
+            break;
+        }
+        case PropertyDesc::Vec4: {
+            float v[4] = {d.fVal[0], d.fVal[1], d.fVal[2], d.fVal[3]};
+            float lw = d.label.empty() ? 1.0f : labelWidth;
+            Vector4Control(d.label.empty() ? " " : d.label, v, d.speed, lw);
+            if (v[0] != d.fVal[0] || v[1] != d.fVal[1] || v[2] != d.fVal[2] || v[3] != d.fVal[3])
+            {
+                PropertyChange c;
+                c.index = i;
+                c.type = PropertyDesc::Vec4;
+                c.fVal[0] = v[0];
+                c.fVal[1] = v[1];
+                c.fVal[2] = v[2];
+                c.fVal[3] = v[3];
+                changes.push_back(c);
+            }
+            break;
+        }
+        case PropertyDesc::Enum: {
+            doLabel(d.label);
+            int idx = d.iVal;
+            int orig = idx;
+            std::vector<const char *> cstrs;
+            cstrs.reserve(d.enumNames.size());
+            for (const auto &s : d.enumNames)
+                cstrs.push_back(s.c_str());
+            ImGui::Combo(d.widgetId.c_str(), &idx, cstrs.data(), static_cast<int>(cstrs.size()));
+            if (idx != orig)
+            {
+                PropertyChange c;
+                c.index = i;
+                c.type = PropertyDesc::Enum;
+                c.iVal = idx;
+                changes.push_back(c);
+            }
+            break;
+        }
+        case PropertyDesc::Color: {
+            doLabel(d.label);
+            float col[4] = {d.fVal[0], d.fVal[1], d.fVal[2], d.fVal[3]};
+            if (ImGui::ColorEdit4(d.widgetId.c_str(), col))
+            {
+                PropertyChange c;
+                c.index = i;
+                c.type = PropertyDesc::Color;
+                c.fVal[0] = col[0];
+                c.fVal[1] = col[1];
+                c.fVal[2] = col[2];
+                c.fVal[3] = col[3];
+                changes.push_back(c);
+            }
+            break;
+        }
+        } // switch
+    }
+    return changes;
+}
+
 } // namespace infernux
