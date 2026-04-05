@@ -3,7 +3,7 @@ import sys
 sys.dont_write_bytecode = True
 
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QMessageBox, QDialog,
+    QApplication, QMainWindow, QWidget, QMessageBox, QDialog,QFileDialog,
     QHBoxLayout, QVBoxLayout, QSizePolicy, QStackedWidget,
 )
 from PySide6.QtCore import Qt, QTimer
