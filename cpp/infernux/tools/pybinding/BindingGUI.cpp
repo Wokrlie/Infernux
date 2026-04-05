@@ -1,12 +1,10 @@
 #include "Infernux.h"
-
-#ifdef DrawText
-#undef DrawText
-#endif
-
 #include "gui/InxGUIContext.h"
 #include "gui/InxGUIRenderable.h"
 #include "gui/InxResourcePreviewer.h"
+#ifdef DrawText
+#undef DrawText
+#endif
 #include <function/editor/ConsolePanel.h>
 #include <function/editor/EditorPanel.h>
 #include <function/editor/HierarchyPanel.h>
