@@ -218,3 +218,23 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
             pass
 
     pp.invalidate_asset_inspector = _invalidate_asset_inspector
+
+    # -- External file drop from OS (e.g. Windows Explorer drag) ------
+    # Register a lightweight per-frame renderable that forwards OS-level
+    # file drops to the ProjectPanel when it is the focused window.
+    from Infernux.lib import InxGUIRenderable, InxGUIContext, InputManager
+
+    class _ExternalDropForwarder(InxGUIRenderable):
+        def on_render(self, ctx: InxGUIContext):
+            try:
+                im = InputManager.instance()
+                if im is None or not im.has_dropped_files():
+                    return
+                files = im.get_dropped_files()
+                if files and pp.get_current_path():
+                    pp.receive_dropped_files(files)
+            except Exception:
+                pass
+
+    bs._external_drop_forwarder = _ExternalDropForwarder()
+    bs.engine.register_gui("project_drop_forwarder", bs._external_drop_forwarder)

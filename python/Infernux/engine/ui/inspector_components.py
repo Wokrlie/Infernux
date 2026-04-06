@@ -1841,14 +1841,23 @@ def _picker_scene_gameobjects(filter_text: str, required_component: str = None):
     return items
 
 
-def _picker_assets(filter_text: str, pattern: str):
-    """Return ``[(display_name, path), ...]`` for assets matching *pattern*."""
+def _picker_assets(filter_text: str, pattern: str, *, assets_only: bool = False):
+    """Return ``[(display_name, path), ...]`` for assets matching *pattern*.
+
+    When *assets_only* is True, only assets whose paths are under the
+    project ``Assets/`` folder are returned (engine/built-in resources
+    from ``Library/Resources`` are excluded).
+    """
     import os
     from Infernux.core.assets import AssetManager
     paths = AssetManager.find_assets(pattern)
     items = []
     filt = filter_text.lower()
     for p in paths:
+        if assets_only:
+            norm = p.replace("\\", "/")
+            if "/Assets/" not in norm and not norm.startswith("Assets/"):
+                continue
         name = os.path.basename(p)
         if filt and filt not in name.lower():
             continue
@@ -1867,7 +1876,7 @@ def _make_list_picker_providers(element_type, metadata):
     if element_type == FieldType.MATERIAL:
         return (None, lambda filt: _picker_assets(filt, "*.mat"))
     if element_type == FieldType.TEXTURE:
-        return (None, lambda filt: _picker_assets(filt, "*.png") + _picker_assets(filt, "*.jpg"))
+        return (None, lambda filt: _picker_assets(filt, "*.png", assets_only=True) + _picker_assets(filt, "*.jpg", assets_only=True))
     if element_type == FieldType.SHADER:
         return (None, lambda filt: _picker_assets(filt, "*.vert") + _picker_assets(filt, "*.frag"))
     if element_type == FieldType.ASSET:

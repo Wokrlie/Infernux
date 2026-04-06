@@ -42,6 +42,10 @@ class ProjectPanel : public EditorPanel
 
     void InvalidateMaterialThumbnail(const std::string &filePath);
 
+    /// Accept files dropped from the OS (e.g. Windows Explorer).
+    /// Copies each file/directory into the current directory.
+    void ReceiveDroppedFiles(const std::vector<std::string> &paths);
+
     /// State persistence
     std::string GetCurrentPath() const
     {

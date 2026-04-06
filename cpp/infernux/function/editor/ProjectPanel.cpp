@@ -8,6 +8,11 @@
 #include <cstring>
 #include <filesystem>
 
+#ifdef INX_PLATFORM_WINDOWS
+#include <ShlObj.h> // CF_HDROP, DragQueryFileW
+#include <strsafe.h>
+#endif
+
 namespace fs = std::filesystem;
 
 // ImGui key constants
@@ -22,6 +27,7 @@ static constexpr int kKeyEscape = ImGuiKey_Escape;
 static constexpr int kKeyC = ImGuiKey_C;
 static constexpr int kKeyV = ImGuiKey_V;
 static constexpr int kKeyX = ImGuiKey_X;
+static constexpr int kKeyN = ImGuiKey_N;
 
 // Unicode characters
 static constexpr const char *kExpandedArrow = "\xe2\x96\xbc";   // ▼
@@ -1063,6 +1069,18 @@ void ProjectPanel::HandleKeyboardShortcuts(InxGUIContext *ctx)
         return;
 
     bool ctrl = IsCtrl(ctx);
+    bool shift = IsShift(ctx);
+
+    // Ctrl+Shift+N: create new folder (no selection required)
+    if (ctrl && shift && ctx->IsKeyPressed(kKeyN)) {
+        CreateAndRename("NewFolder", "", [this](const std::string &name) {
+            if (createFolder)
+                return createFolder(m_currentPath, name);
+            return std::make_pair(false, std::string("No callback"));
+        });
+        return;
+    }
+
     // Early out: avoid GetSelectedPaths() syscalls when no key is pressed
     bool anyRelevantKey = ctx->IsKeyPressed(kKeyF2) || ctx->IsKeyPressed(kKeyDelete) ||
                           (ctrl && (ctx->IsKeyPressed(kKeyC) || ctx->IsKeyPressed(kKeyX) || ctx->IsKeyPressed(kKeyV)));
@@ -1101,6 +1119,59 @@ void ProjectPanel::HandleExternalFileDrops()
     // This is handled via callback from Python's InputManager binding
     // since InputManager singleton access is simpler from Python.
     // The Python bootstrap wiring handles this.
+}
+
+void ProjectPanel::ReceiveDroppedFiles(const std::vector<std::string> &paths)
+{
+    if (paths.empty() || m_currentPath.empty())
+        return;
+
+    std::error_code ec;
+    std::vector<std::string> copiedPaths;
+
+    for (auto &src : paths) {
+        if (src.empty() || !fs::exists(fs::u8path(src), ec))
+            continue;
+
+        auto name = fs::u8path(src).filename().string();
+        auto dst = (fs::u8path(m_currentPath) / name).string();
+
+        // If destination already exists, use unique name
+        if (fs::exists(fs::u8path(dst), ec)) {
+            if (!getUniqueName)
+                continue;
+            auto stem = fs::u8path(name).stem().string();
+            auto ext = fs::u8path(name).extension().string();
+            if (fs::is_directory(fs::u8path(src), ec)) {
+                ext = "";
+                stem = name;
+            }
+            auto uniqueName = getUniqueName(m_currentPath, stem, ext);
+            dst = (fs::u8path(m_currentPath) / (uniqueName + ext)).string();
+        }
+
+        try {
+            if (fs::is_directory(fs::u8path(src), ec)) {
+                fs::copy(fs::u8path(src), fs::u8path(dst), fs::copy_options::recursive, ec);
+            } else {
+                fs::copy_file(fs::u8path(src), fs::u8path(dst), ec);
+            }
+            if (!ec)
+                copiedPaths.push_back(dst);
+        } catch (...) {
+            continue;
+        }
+    }
+
+    if (copiedPaths.empty())
+        return;
+
+    m_pendingCacheInvalidation = true;
+    m_selectedFiles = copiedPaths;
+    m_selectedFile = copiedPaths.back();
+    m_selectedSet.clear();
+    m_selectedSet.insert(copiedPaths.begin(), copiedPaths.end());
+    NotifySelectionChanged();
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1183,6 +1254,37 @@ void ProjectPanel::CreateAndRename(const std::string &baseName, const std::strin
 // Clipboard
 // ════════════════════════════════════════════════════════════════════
 
+/// Retrieve file paths from the OS clipboard (CF_HDROP on Windows).
+static std::vector<std::string> GetOSClipboardFiles()
+{
+    std::vector<std::string> result;
+#ifdef INX_PLATFORM_WINDOWS
+    if (!OpenClipboard(nullptr))
+        return result;
+
+    HANDLE hData = GetClipboardData(CF_HDROP);
+    if (hData) {
+        HDROP hDrop = static_cast<HDROP>(hData);
+        UINT fileCount = DragQueryFileW(hDrop, 0xFFFFFFFF, nullptr, 0);
+        for (UINT i = 0; i < fileCount; ++i) {
+            UINT len = DragQueryFileW(hDrop, i, nullptr, 0);
+            if (len == 0)
+                continue;
+            std::wstring wpath(len + 1, L'\0');
+            DragQueryFileW(hDrop, i, wpath.data(), len + 1);
+            wpath.resize(len);
+            // Convert wstring to UTF-8 via filesystem
+            std::error_code ec;
+            auto u8str = fs::path(wpath).string();
+            if (!u8str.empty())
+                result.push_back(std::move(u8str));
+        }
+    }
+    CloseClipboard();
+#endif
+    return result;
+}
+
 void ProjectPanel::ClipboardCopy(const std::vector<std::string> &paths)
 {
     m_clipboardPaths.clear();
@@ -1216,9 +1318,19 @@ void ProjectPanel::ClipboardPaste()
 {
     std::error_code ec;
     std::vector<std::string> sources;
+    bool isCut = m_clipboardIsCut;
+
+    // Try internal clipboard first
     for (auto &p : m_clipboardPaths)
         if (fs::exists(fs::u8path(p), ec))
             sources.push_back(p);
+
+    // Fall back to OS clipboard (always copy, never cut)
+    if (sources.empty()) {
+        sources = GetOSClipboardFiles();
+        isCut = false;
+    }
+
     if (sources.empty()) {
         m_clipboardPaths.clear();
         return;
@@ -1230,7 +1342,7 @@ void ProjectPanel::ClipboardPaste()
         auto dst = (fs::u8path(m_currentPath) / name).string();
         bool samePath = (NormalizePath(src) == NormalizePath(dst));
 
-        if (samePath && m_clipboardIsCut)
+        if (samePath && isCut)
             continue;
 
         if (samePath || fs::exists(dst, ec)) {
@@ -1247,7 +1359,7 @@ void ProjectPanel::ClipboardPaste()
         }
 
         try {
-            if (m_clipboardIsCut) {
+            if (isCut) {
                 if (moveItemToDirectory) {
                     auto result = moveItemToDirectory(src, m_currentPath);
                     if (!result.empty())
@@ -1274,7 +1386,7 @@ void ProjectPanel::ClipboardPaste()
     if (pastedPaths.empty())
         return;
 
-    if (m_clipboardIsCut)
+    if (isCut)
         m_clipboardPaths.clear();
 
     m_pendingCacheInvalidation = true;
