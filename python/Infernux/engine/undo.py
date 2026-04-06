@@ -219,6 +219,17 @@ def _bump_inspector_values():
         pass
 
 
+def _require_scene_object(object_id: int, label: str):
+    """Return (scene, obj) or raise RuntimeError with *label* context."""
+    scene = _get_active_scene()
+    if not scene:
+        raise RuntimeError(f"[Undo] {label}: no scene")
+    obj = scene.find_by_id(object_id)
+    if not obj:
+        raise RuntimeError(f"[Undo] {label}: object {object_id} not found")
+    return scene, obj
+
+
 def _notify_gizmos_scene_changed():
     from Infernux.gizmos.collector import notify_scene_changed
     notify_scene_changed()
@@ -775,6 +786,79 @@ class MoveGameObjectCommand(UndoCommand):
 # Component add / remove — generic for both native (C++) and Python
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _snapshot_and_remove_native(object_id: int, type_name: str,
+                                label: str) -> str:
+    """Find, snapshot-serialize, remove a native component. Return JSON."""
+    _scene, obj = _require_scene_object(object_id, label)
+    live = _find_live_native_component(obj, type_name)
+    if live is None:
+        raise RuntimeError(f"[Undo] {label}: component '{type_name}' not found")
+    json_snap = ""
+    if hasattr(live, "serialize"):
+        try:
+            json_snap = live.serialize()
+        except Exception:
+            pass
+    obj.remove_component(live)
+    _invalidate_builtin_wrapper(live)
+    _bump_inspector_structure()
+    _notify_gizmos_scene_changed()
+    return json_snap
+
+
+def _add_native_from_snapshot(object_id: int, type_name: str,
+                              json_snapshot: Optional[str],
+                              label: str) -> None:
+    """Add a native component and optionally deserialize from snapshot."""
+    _scene, obj = _require_scene_object(object_id, label)
+    result = obj.add_component(type_name)
+    if not result:
+        raise RuntimeError(f"[Undo] {label}: add '{type_name}' failed")
+    if json_snapshot and hasattr(result, "deserialize"):
+        try:
+            result.deserialize(json_snapshot)
+        except Exception:
+            pass
+    _bump_inspector_structure()
+    _notify_gizmos_scene_changed()
+
+
+def _snapshot_and_remove_py(object_id: int, type_name: str, script_guid: str,
+                            ordinal: int, py_comp_ref: Any,
+                            label: str):
+    """Find live py component, snapshot fields+enabled, remove it.
+
+    Returns ``(fields_json, enabled, live_ref)``.
+    """
+    _scene, obj = _require_scene_object(object_id, label)
+    live = _resolve_live_py(obj, type_name, script_guid, ordinal, py_comp_ref)
+    if live is None:
+        raise RuntimeError(f"[Undo] {label}: component not found")
+    fields_json = _snapshot_py_fields(live)
+    enabled = _snapshot_py_enabled(live)
+    obj.remove_py_component(live)
+    _bump_inspector_structure()
+    return fields_json, enabled, live
+
+
+def _add_py_from_snapshot(object_id: int, type_name: str, script_guid: str,
+                          fields_json, enabled, label: str):
+    """Instantiate py component from snapshot, add to object. Returns instance."""
+    _scene, obj = _require_scene_object(object_id, label)
+    instance = _instantiate_py_snapshot(
+        type_name, script_guid, fields_json, enabled, description=label)
+    if instance is None:
+        raise RuntimeError(f"[Undo] {label}: recreate failed")
+    obj.add_py_component(instance)
+    if hasattr(instance, '_call_on_after_deserialize'):
+        try:
+            instance._call_on_after_deserialize()
+        except Exception:
+            pass
+    _bump_inspector_structure()
+    return instance
+
+
 class AddNativeComponentCommand(UndoCommand):
     """Undo removes the C++ component; redo re-adds from JSON snapshot."""
 
@@ -789,42 +873,14 @@ class AddNativeComponentCommand(UndoCommand):
         pass  # already added before record()
 
     def undo(self) -> None:
-        scene = _get_active_scene()
-        if not scene:
-            raise RuntimeError(f"[Undo] AddNative('{self._type_name}').undo: no scene")
-        obj = scene.find_by_id(self._object_id)
-        if not obj:
-            raise RuntimeError(f"[Undo] AddNative('{self._type_name}').undo: object not found")
-        live = _find_live_native_component(obj, self._type_name)
-        if live is None:
-            raise RuntimeError(f"[Undo] AddNative('{self._type_name}').undo: component not found")
-        if hasattr(live, "serialize"):
-            try:
-                self._json_snapshot = live.serialize()
-            except Exception:
-                pass
-        obj.remove_component(live)
-        _invalidate_builtin_wrapper(live)
-        _bump_inspector_structure()
-        _notify_gizmos_scene_changed()
+        self._json_snapshot = _snapshot_and_remove_native(
+            self._object_id, self._type_name,
+            f"AddNative('{self._type_name}').undo")
 
     def redo(self) -> None:
-        scene = _get_active_scene()
-        if not scene:
-            raise RuntimeError(f"[Undo] AddNative('{self._type_name}').redo: no scene")
-        obj = scene.find_by_id(self._object_id)
-        if not obj:
-            raise RuntimeError(f"[Undo] AddNative('{self._type_name}').redo: object not found")
-        result = obj.add_component(self._type_name)
-        if not result:
-            raise RuntimeError(f"[Undo] AddNative('{self._type_name}').redo: add failed")
-        if self._json_snapshot and hasattr(result, "deserialize"):
-            try:
-                result.deserialize(self._json_snapshot)
-            except Exception:
-                pass
-        _bump_inspector_structure()
-        _notify_gizmos_scene_changed()
+        _add_native_from_snapshot(
+            self._object_id, self._type_name, self._json_snapshot,
+            f"AddNative('{self._type_name}').redo")
 
 
 class RemoveNativeComponentCommand(UndoCommand):
@@ -846,45 +902,17 @@ class RemoveNativeComponentCommand(UndoCommand):
         self._do_remove()
 
     def undo(self) -> None:
-        scene = _get_active_scene()
-        if not scene:
-            raise RuntimeError(f"[Undo] RemoveNative('{self._type_name}').undo: no scene")
-        obj = scene.find_by_id(self._object_id)
-        if not obj:
-            raise RuntimeError(f"[Undo] RemoveNative('{self._type_name}').undo: object not found")
-        result = obj.add_component(self._type_name)
-        if not result:
-            raise RuntimeError(f"[Undo] RemoveNative('{self._type_name}').undo: add failed")
-        if self._json_snapshot and hasattr(result, "deserialize"):
-            try:
-                result.deserialize(self._json_snapshot)
-            except Exception:
-                pass
-        _bump_inspector_structure()
-        _notify_gizmos_scene_changed()
+        _add_native_from_snapshot(
+            self._object_id, self._type_name, self._json_snapshot,
+            f"RemoveNative('{self._type_name}').undo")
 
     def redo(self) -> None:
         self._do_remove()
 
     def _do_remove(self) -> None:
-        scene = _get_active_scene()
-        if not scene:
-            raise RuntimeError(f"[Undo] RemoveNative('{self._type_name}'): no scene")
-        obj = scene.find_by_id(self._object_id)
-        if not obj:
-            raise RuntimeError(f"[Undo] RemoveNative('{self._type_name}'): object not found")
-        live = _find_live_native_component(obj, self._type_name)
-        if live is None:
-            raise RuntimeError(f"[Undo] RemoveNative('{self._type_name}'): component not found")
-        if hasattr(live, "serialize"):
-            try:
-                self._json_snapshot = live.serialize()
-            except Exception:
-                pass
-        obj.remove_component(live)
-        _invalidate_builtin_wrapper(live)
-        _bump_inspector_structure()
-        _notify_gizmos_scene_changed()
+        self._json_snapshot = _snapshot_and_remove_native(
+            self._object_id, self._type_name,
+            f"RemoveNative('{self._type_name}')")
 
 
 # -- Python component helpers --
@@ -1017,44 +1045,17 @@ class AddPyComponentCommand(UndoCommand):
         pass  # already added before record()
 
     def undo(self) -> None:
-        scene = _get_active_scene()
-        if not scene:
-            raise RuntimeError(f"[Undo] AddPy('{self._type_name_str}').undo: no scene")
-        obj = scene.find_by_id(self._object_id)
-        if not obj:
-            raise RuntimeError(f"[Undo] AddPy('{self._type_name_str}').undo: object not found")
-        live = _resolve_live_py(
-            obj, self._type_name_str, self._script_guid,
-            self._ordinal, self._py_comp_ref)
-        if live is None:
-            raise RuntimeError(f"[Undo] AddPy('{self._type_name_str}').undo: component not found")
-        self._fields_json = _snapshot_py_fields(live)
-        self._enabled = _snapshot_py_enabled(live)
-        self._py_comp_ref = live
-        obj.remove_py_component(live)
-        _bump_inspector_structure()
+        fj, en, live = _snapshot_and_remove_py(
+            self._object_id, self._type_name_str, self._script_guid,
+            self._ordinal, self._py_comp_ref,
+            f"AddPy('{self._type_name_str}').undo")
+        self._fields_json, self._enabled, self._py_comp_ref = fj, en, live
 
     def redo(self) -> None:
-        scene = _get_active_scene()
-        if not scene:
-            raise RuntimeError(f"[Undo] AddPy('{self._type_name_str}').redo: no scene")
-        obj = scene.find_by_id(self._object_id)
-        if not obj:
-            raise RuntimeError(f"[Undo] AddPy('{self._type_name_str}').redo: object not found")
-        instance = _instantiate_py_snapshot(
-            self._type_name_str, self._script_guid,
+        self._py_comp_ref = _add_py_from_snapshot(
+            self._object_id, self._type_name_str, self._script_guid,
             self._fields_json, self._enabled,
-            description=f"AddPy('{self._type_name_str}').redo")
-        if instance is None:
-            raise RuntimeError(f"[Undo] AddPy('{self._type_name_str}').redo: recreate failed")
-        obj.add_py_component(instance)
-        if hasattr(instance, '_call_on_after_deserialize'):
-            try:
-                instance._call_on_after_deserialize()
-            except Exception:
-                pass
-        self._py_comp_ref = instance
-        _bump_inspector_structure()
+            f"AddPy('{self._type_name_str}').redo")
 
 
 class RemovePyComponentCommand(UndoCommand):
@@ -1075,47 +1076,20 @@ class RemovePyComponentCommand(UndoCommand):
         self._do_remove()
 
     def undo(self) -> None:
-        scene = _get_active_scene()
-        if not scene:
-            raise RuntimeError(f"[Undo] RemovePy('{self._type_name_str}').undo: no scene")
-        obj = scene.find_by_id(self._object_id)
-        if not obj:
-            raise RuntimeError(f"[Undo] RemovePy('{self._type_name_str}').undo: object not found")
-        instance = _instantiate_py_snapshot(
-            self._type_name_str, self._script_guid,
+        self._py_comp_ref = _add_py_from_snapshot(
+            self._object_id, self._type_name_str, self._script_guid,
             self._fields_json, self._enabled,
-            description=f"RemovePy('{self._type_name_str}').undo")
-        if instance is None:
-            raise RuntimeError(f"[Undo] RemovePy('{self._type_name_str}').undo: recreate failed")
-        obj.add_py_component(instance)
-        if hasattr(instance, '_call_on_after_deserialize'):
-            try:
-                instance._call_on_after_deserialize()
-            except Exception:
-                pass
-        self._py_comp_ref = instance
-        _bump_inspector_structure()
+            f"RemovePy('{self._type_name_str}').undo")
 
     def redo(self) -> None:
         self._do_remove()
 
     def _do_remove(self) -> None:
-        scene = _get_active_scene()
-        if not scene:
-            raise RuntimeError(f"[Undo] RemovePy('{self._type_name_str}'): no scene")
-        obj = scene.find_by_id(self._object_id)
-        if not obj:
-            raise RuntimeError(f"[Undo] RemovePy('{self._type_name_str}'): object not found")
-        live = _resolve_live_py(
-            obj, self._type_name_str, self._script_guid,
-            self._ordinal, self._py_comp_ref)
-        if live is None:
-            raise RuntimeError(f"[Undo] RemovePy('{self._type_name_str}'): component not found")
-        self._fields_json = _snapshot_py_fields(live)
-        self._enabled = _snapshot_py_enabled(live)
-        self._py_comp_ref = live
-        obj.remove_py_component(live)
-        _bump_inspector_structure()
+        fj, en, live = _snapshot_and_remove_py(
+            self._object_id, self._type_name_str, self._script_guid,
+            self._ordinal, self._py_comp_ref,
+            f"RemovePy('{self._type_name_str}')")
+        self._fields_json, self._enabled, self._py_comp_ref = fj, en, live
 
 
 # ═══════════════════════════════════════════════════════════════════════════

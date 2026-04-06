@@ -807,6 +807,31 @@ def _asset_guid_from_path(file_path: str) -> str:
     return guid
 
 
+def _resolve_guid_and_path(payload: str):
+    """Resolve a string payload to (guid, path_hint).
+
+    If *payload* is an existing file path, the GUID is looked up from the
+    asset database.  Otherwise *payload* is treated as a GUID and the path
+    is resolved in reverse.
+    """
+    import os
+    guid = ""
+    path_hint = ""
+    if os.path.isfile(payload):
+        path_hint = payload
+        guid = _asset_guid_from_path(payload)
+    else:
+        guid = payload
+        try:
+            from Infernux.core.assets import AssetManager
+            adb = getattr(AssetManager, '_asset_database', None)
+            if adb:
+                path_hint = adb.get_path_from_guid(guid) or ""
+        except Exception:
+            pass
+    return guid, path_hint
+
+
 def _create_reference_value_from_payload(element_type, payload, required_component: str = None):
     from Infernux.components.serialized_field import FieldType
 
@@ -814,21 +839,7 @@ def _create_reference_value_from_payload(element_type, payload, required_compone
         # String payload = prefab drag (GUID or file path)
         if isinstance(payload, str):
             from Infernux.components.ref_wrappers import PrefabRef
-            import os
-            guid = ""
-            path_hint = ""
-            if os.path.isfile(payload):
-                path_hint = payload
-                guid = _asset_guid_from_path(payload)
-            else:
-                guid = payload
-                try:
-                    from Infernux.core.assets import AssetManager
-                    adb = getattr(AssetManager, '_asset_database', None)
-                    if adb:
-                        path_hint = adb.get_path_from_guid(guid) or ""
-                except Exception:
-                    pass
+            guid, path_hint = _resolve_guid_and_path(payload)
             return PrefabRef(guid=guid, path_hint=path_hint)
 
         # Int payload = scene hierarchy drag
@@ -1311,6 +1322,14 @@ def render_cpp_component_generic(ctx: InxGUIContext, comp):
 _render_info_text = render_info_text
 
 
+def _tooltip_and_info(ctx, metadata):
+    """Show tooltip on hover and info text below the field if available."""
+    if metadata.tooltip and ctx.is_item_hovered():
+        ctx.set_tooltip(metadata.tooltip)
+    if metadata.info_text:
+        _render_info_text(ctx, metadata.info_text)
+
+
 def _render_serializable_object_field(
     ctx: InxGUIContext, comp, field_name: str, metadata, current_value, lw: float,
 ):
@@ -1577,8 +1596,7 @@ def render_py_component(ctx: InxGUIContext, py_comp):
             _flush()
             field_label(ctx, pretty_field_name(field_name), lw)
             ctx.label(f"{current_value}")
-            if metadata.tooltip and ctx.is_item_hovered():
-                ctx.set_tooltip(metadata.tooltip)
+            _tooltip_and_info(ctx, metadata)
             continue
 
         # ── Non-scalar types: flush batch, render individually ──
@@ -1587,19 +1605,13 @@ def render_py_component(ctx: InxGUIContext, py_comp):
             from Infernux.components.serialized_field import get_raw_field_value
             _raw_list = get_raw_field_value(py_comp, field_name)
             _render_list_field(ctx, py_comp, field_name, metadata, _raw_list, lw)
-            if metadata.tooltip and ctx.is_item_hovered():
-                ctx.set_tooltip(metadata.tooltip)
-            if metadata.info_text:
-                _render_info_text(ctx, metadata.info_text)
+            _tooltip_and_info(ctx, metadata)
             continue
 
         if metadata.field_type == FieldType.SERIALIZABLE_OBJECT:
             _flush()
             _render_serializable_object_field(ctx, py_comp, field_name, metadata, current_value, lw)
-            if metadata.tooltip and ctx.is_item_hovered():
-                ctx.set_tooltip(metadata.tooltip)
-            if metadata.info_text:
-                _render_info_text(ctx, metadata.info_text)
+            _tooltip_and_info(ctx, metadata)
             continue
 
         if metadata.field_type == FieldType.COMPONENT:
@@ -1635,10 +1647,7 @@ def render_py_component(ctx: InxGUIContext, py_comp):
                 on_pick=_comp_on_pick,
                 on_clear=_comp_on_clear,
             )
-            if metadata.tooltip and ctx.is_item_hovered():
-                ctx.set_tooltip(metadata.tooltip)
-            if metadata.info_text:
-                _render_info_text(ctx, metadata.info_text)
+            _tooltip_and_info(ctx, metadata)
             continue
 
         if metadata.field_type == FieldType.GAME_OBJECT:
@@ -1680,19 +1689,13 @@ def render_py_component(ctx: InxGUIContext, py_comp):
                 on_pick=_go_on_pick,
                 on_clear=_go_on_clear,
             )
-            if metadata.tooltip and ctx.is_item_hovered():
-                ctx.set_tooltip(metadata.tooltip)
-            if metadata.info_text:
-                _render_info_text(ctx, metadata.info_text)
+            _tooltip_and_info(ctx, metadata)
             continue
 
         if metadata.field_type in _get_asset_ref_config():
             _flush()
             _render_asset_reference_field(ctx, py_comp, field_name, metadata, current_value, metadata.field_type, lw)
-            if metadata.tooltip and ctx.is_item_hovered():
-                ctx.set_tooltip(metadata.tooltip)
-            if metadata.info_text:
-                _render_info_text(ctx, metadata.info_text)
+            _tooltip_and_info(ctx, metadata)
             continue
 
         # ── Scalar field → try batch ──
@@ -1734,11 +1737,10 @@ def render_py_component(ctx: InxGUIContext, py_comp):
                 refresh_values = True
 
             # Tooltip for non-batched scalar fallback
-            if metadata.tooltip and ctx.is_item_hovered():
-                ctx.set_tooltip(metadata.tooltip)
+            _tooltip_and_info(ctx, metadata)
 
-        # Show info text if available
-        if metadata.info_text:
+        # Show info text for batched fields (tooltip handled by C++ RenderPropertyBatch)
+        if desc is not None and metadata.info_text:
             _render_info_text(ctx, metadata.info_text)
 
     _flush()
@@ -1777,23 +1779,7 @@ def _apply_gameobject_or_prefab_drop(comp, field_name: str, payload, required_co
         # Prefab drop — store a PrefabRef (no scene instantiation)
         try:
             from Infernux.components.ref_wrappers import PrefabRef
-            import os
-            guid = ""
-            path_hint = ""
-            if os.path.isfile(payload):
-                path_hint = payload
-                guid = _asset_guid_from_path(payload)
-            else:
-                # payload is a GUID — resolve path from asset database
-                guid = payload
-                try:
-                    from Infernux.core.assets import AssetManager
-                    adb = getattr(AssetManager, '_asset_database', None)
-                    if adb:
-                        path_hint = adb.get_path_from_guid(guid) or ""
-                except Exception:
-                    pass
-
+            guid, path_hint = _resolve_guid_and_path(payload)
             ref = PrefabRef(guid=guid, path_hint=path_hint)
             old_val = getattr(comp, field_name, None)
             _record_property(comp, field_name, old_val, ref, f"Set {field_name}")
