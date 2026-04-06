@@ -485,6 +485,13 @@ class NuitkaBuilder:
             for _stdlib_mod in self._discover_jit_stdlib_deps():
                 cmd.append(f"--include-module={_stdlib_mod}")
 
+        # Numba's parallel backend (prange / parallel=True) imports
+        # multiprocessing lazily at JIT compile time — NOT at
+        # ``import numba``.  The auto-discovery above therefore misses
+        # it.  Include it unconditionally when JIT packages are bundled.
+        if _nofollow_jit & self._JIT_NOFOLLOW_PACKAGES:
+            cmd.append("--include-module=multiprocessing")
+
         for pkg in self.extra_include_packages:
             if pkg not in _nofollow_jit:
                 cmd.append(f"--include-package={pkg}")

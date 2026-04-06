@@ -1692,87 +1692,93 @@ def _get_nth_live_py_component(game_object_id: int, type_name: str,
     return None
 
 
-# -- Public snapshot/restore functions used by inspector_panel.py --
+# -- Table-driven snapshot/restore for inspector_panel tracker registration --
 
-def snapshot_live_game_object(game_object_id: int) -> str:
-    obj = _get_live_game_object(game_object_id)
-    if obj is None:
-        return ""
+def _snap_game_object(obj) -> str:
     return _json.dumps({"name": obj.name, "active": obj.active})
 
-
-def restore_live_game_object(game_object_id: int, snapshot: str) -> None:
-    obj = _get_live_game_object(game_object_id)
-    if obj is None:
-        return
+def _restore_game_object(obj, snapshot: str) -> None:
     data = _json.loads(snapshot)
     obj.name = data["name"]
     obj.active = data["active"]
 
+# Registry: kind -> (resolver, snap_fn(target)->str, restore_fn(target,str)->None)
+_SNAPSHOT_REGISTRY: dict[str, tuple] = {
+    "game_object":  (_get_live_game_object,           _snap_game_object,          _restore_game_object),
+    "transform":    (_get_live_transform,              lambda t: t.serialize(),    lambda t, s: t.deserialize(s)),
+    "native":       (_get_nth_live_native_component,   lambda c: c.serialize(),    lambda c, s: c.deserialize(s)),
+    "py":           (_get_nth_live_py_component,       lambda c: c._serialize_fields(), lambda c, s: c._deserialize_fields(s)),
+    "renderstack":  (_get_nth_live_py_component,       lambda c: snapshot_renderstack(c), lambda c, s: restore_renderstack(c, s)),
+}
+
+
+def _resolve_and_snap(kind: str, game_object_id: int, **kwargs) -> str:
+    resolver, snap_fn, _ = _SNAPSHOT_REGISTRY[kind]
+    target = resolver(game_object_id, **kwargs) if kwargs else resolver(game_object_id)
+    if target is None:
+        return ""
+    return snap_fn(target)
+
+
+def _resolve_and_restore(kind: str, game_object_id: int, snapshot: str, **kwargs) -> None:
+    _, _, restore_fn = _SNAPSHOT_REGISTRY[kind]
+    resolver = _SNAPSHOT_REGISTRY[kind][0]
+    target = resolver(game_object_id, **kwargs) if kwargs else resolver(game_object_id)
+    if target is None:
+        return
+    restore_fn(target, snapshot)
+
+
+# Public API — thin wrappers for each kind (preserves call signatures)
+
+def snapshot_live_game_object(game_object_id: int) -> str:
+    return _resolve_and_snap("game_object", game_object_id)
+
+def restore_live_game_object(game_object_id: int, snapshot: str) -> None:
+    _resolve_and_restore("game_object", game_object_id, snapshot)
 
 def snapshot_live_transform(game_object_id: int) -> str:
-    t = _get_live_transform(game_object_id)
-    if t is None:
-        return ""
-    return t.serialize()
-
+    return _resolve_and_snap("transform", game_object_id)
 
 def restore_live_transform(game_object_id: int, snapshot: str) -> None:
-    t = _get_live_transform(game_object_id)
-    if t is None:
-        return
-    t.deserialize(snapshot)
-
+    _resolve_and_restore("transform", game_object_id, snapshot)
 
 def snapshot_live_native_component(game_object_id: int, type_name: str,
                                    ordinal: int = 0) -> str:
-    comp = _get_nth_live_native_component(game_object_id, type_name, ordinal)
-    if comp is None:
-        return ""
-    return comp.serialize()
-
+    return _resolve_and_snap("native", game_object_id,
+                             type_name=type_name, ordinal=ordinal)
 
 def restore_live_native_component(game_object_id: int, type_name: str,
                                   ordinal: int, snapshot: str) -> None:
-    comp = _get_nth_live_native_component(game_object_id, type_name, ordinal)
-    if comp is None:
-        return
-    comp.deserialize(snapshot)
-
+    _resolve_and_restore("native", game_object_id, snapshot,
+                         type_name=type_name, ordinal=ordinal)
 
 def snapshot_live_py_component(game_object_id: int, type_name: str,
                                ordinal: int = 0, script_guid: str = "") -> str:
-    comp = _get_nth_live_py_component(game_object_id, type_name, ordinal, script_guid)
-    if comp is None:
-        return ""
-    return comp._serialize_fields()
-
+    return _resolve_and_snap("py", game_object_id,
+                             type_name=type_name, ordinal=ordinal,
+                             script_guid=script_guid)
 
 def restore_live_py_component(game_object_id: int, type_name: str,
                               ordinal: int, snapshot: str,
                               script_guid: str = "") -> None:
-    comp = _get_nth_live_py_component(game_object_id, type_name, ordinal, script_guid)
-    if comp is None:
-        return
-    comp._deserialize_fields(snapshot)
-
+    _resolve_and_restore("py", game_object_id, snapshot,
+                         type_name=type_name, ordinal=ordinal,
+                         script_guid=script_guid)
 
 def snapshot_live_renderstack_component(game_object_id: int, type_name: str,
                                         ordinal: int = 0,
                                         script_guid: str = "") -> str:
-    comp = _get_nth_live_py_component(game_object_id, type_name, ordinal, script_guid)
-    if comp is None:
-        return ""
-    return snapshot_renderstack(comp)
-
+    return _resolve_and_snap("renderstack", game_object_id,
+                             type_name=type_name, ordinal=ordinal,
+                             script_guid=script_guid)
 
 def restore_live_renderstack_component(game_object_id: int, type_name: str,
                                        ordinal: int, snapshot: str,
                                        script_guid: str = "") -> None:
-    comp = _get_nth_live_py_component(game_object_id, type_name, ordinal, script_guid)
-    if comp is None:
-        return
-    restore_renderstack(comp, snapshot)
+    _resolve_and_restore("renderstack", game_object_id, snapshot,
+                         type_name=type_name, ordinal=ordinal,
+                         script_guid=script_guid)
 
 
 # -- RenderStack snapshot/restore --

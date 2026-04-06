@@ -37,6 +37,7 @@ import threading
 import time
 from typing import Callable, Dict, List, Optional
 
+import Infernux._jit_kernels as _jit_kernels
 from Infernux.debug import Debug
 from Infernux.engine.i18n import t
 from Infernux.engine.nuitka_builder import NuitkaBuilder
@@ -862,6 +863,30 @@ finally:
                 if fname.endswith(".py"):
                     py_path = os.path.join(root, fname)
                     _compile_count += 1
+                    try:
+                        with open(py_path, "r", encoding="utf-8") as sf:
+                            source_text = sf.read()
+                        sidecar_source = _jit_kernels.build_auto_parallel_sidecar_source(source_text)
+                        if sidecar_source:
+                            sidecar_py = py_path[:-3] + ".autop.py"
+                            with open(sidecar_py, "w", encoding="utf-8", newline="\n") as apf:
+                                apf.write(sidecar_source)
+                            py_compile.compile(
+                                sidecar_py,
+                                cfile=sidecar_py + "c",
+                                optimize=2,
+                                doraise=True,
+                            )
+                            os.remove(sidecar_py)
+                            Debug.log_internal(
+                                f"  auto_parallel sidecar: {os.path.basename(sidecar_py)}c"
+                            )
+                    except (OSError, SyntaxError, py_compile.PyCompileError) as _sc_exc:
+                        Debug.log_warning(
+                            f"  auto_parallel sidecar generation failed for "
+                            f"{fname}: {_sc_exc}"
+                        )
+
                     try:
                         py_compile.compile(
                             py_path,
