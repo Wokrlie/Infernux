@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import os
 import py_compile
+import re
 import shutil
 import struct
 import subprocess
@@ -123,7 +124,7 @@ class GameBuilder:
         splash_items: Optional[List[Dict]] = None,
         debug_mode: bool = False,
         lto: bool = True,
-        enable_jit: bool = True,
+        enable_jit: bool = False,
     ):
         self.project_path = os.path.abspath(project_path)
         self.project_name = game_name.strip() if game_name.strip() else os.path.basename(self.project_path)
@@ -667,6 +668,21 @@ finally:
                 Debug.log_internal(
                     f"  copied {dirname}/ in {time.perf_counter() - _t0:.2f}s"
                 )
+
+        # When JIT is disabled, strip numba from the shipped requirements
+        # so the player runtime doesn't warn about "missing packages: numba".
+        if not self.enable_jit:
+            req_file = os.path.join(data_dir, "ProjectSettings", "requirements.txt")
+            if os.path.isfile(req_file):
+                with open(req_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                filtered = [
+                    ln for ln in lines
+                    if not re.match(r"^\s*numba\b", ln, re.IGNORECASE)
+                ]
+                if len(filtered) != len(lines):
+                    with open(req_file, "w", encoding="utf-8") as f:
+                        f.writelines(filtered)
 
     # ------------------------------------------------------------------
     # Collect user script dependencies

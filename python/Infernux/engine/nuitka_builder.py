@@ -451,6 +451,10 @@ class NuitkaBuilder:
         # (Nuitka may not auto-detect it because it's a .pyd, not .py).
         cmd.append("--include-module=Infernux.lib._Infernux")
 
+        # csv is needed by importlib.metadata (Python's own import system)
+        # but Nuitka may not auto-detect it when JIT packages are excluded.
+        cmd.append("--include-module=csv")
+
         # Prevent Nuitka from following into editor-only modules that the
         # standalone player never uses.  The _INFERNUX_PLAYER_MODE guard
         # in __init__ already prevents runtime loading, but --nofollow

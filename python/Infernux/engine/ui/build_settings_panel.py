@@ -383,7 +383,7 @@ class BuildSettingsPanel:
         self._window_resizable = data.get("window_resizable", True)
         self._debug_mode = data.get("debug_mode", False)
         self._lto = data.get("lto", True)
-        self._enable_jit = data.get("enable_jit", True)
+        self._enable_jit = data.get("enable_jit", False)
         self._splash_items = list(data.get("splash_items", []))
 
     def _prune_missing_splash(self):
