@@ -1,7 +1,7 @@
 # Infernux Scripting API
 
 <div class="class-info">
-Version 0.1
+Version 0.1.2
  &nbsp;|&nbsp; <a href="../../zh/api/index.html">中文</a>
 </div>
 
@@ -25,6 +25,7 @@ Welcome to the Infernux Scripting API Reference. Browse packages from the sideba
 | Infernux.debug | Debug |
 | Infernux.gizmos | Gizmos |
 | Infernux.input | KeyCode, Input |
+| Infernux.jit | njit, warmup |
 | Infernux.math | vector3, vector2, vector4, quaternion |
 | Infernux.mathf | Mathf |
 | Infernux.physics | Physics |

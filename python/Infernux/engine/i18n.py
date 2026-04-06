@@ -210,6 +210,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     # ── Build settings body ───────────────────────────────────────────
     "build.game_name":                  {"en": "Game Name",                 "zh": "游戏名称"},
     "build.game_name_hint":             {"en": "(default: {name})",         "zh": "(默认: {name})"},
+    "build.debug_mode":                 {"en": "Debug Mode",               "zh": "调试模式"},
+    "build.lto":                        {"en": "LTO (slower build, better perf)", "zh": "LTO（编译更慢，性能更好）"},
     "build.output_directory":           {"en": "Output Directory",          "zh": "输出目录"},
     "build.output_directory_hint":      {"en": "Use an empty folder, or reuse one containing {marker} from a previous Infernux build.", "zh": "请使用空文件夹，或复用包含旧 Infernux 构建标记文件 {marker} 的目录。"},
     "build.output_directory_error_title": {"en": "Invalid Build Output Directory", "zh": "无效的构建输出目录"},
@@ -256,6 +258,34 @@ _STRINGS: dict[str, dict[str, str]] = {
     "build.open_folder":                {"en": "Open Folder",               "zh": "打开文件夹"},
     "build.build":                      {"en": "Build",                     "zh": "构建"},
     "build.build_and_run":              {"en": "Build And Run",             "zh": "构建并运行"},
+
+    # ── Build pipeline steps ──────────────────────────────────────────
+    "build.step.validating":            {"en": "Validating project...",                 "zh": "验证项目..."},
+    "build.step.cleaning_output":       {"en": "Cleaning output...",                    "zh": "清理输出目录..."},
+    "build.step.collecting_deps":       {"en": "Collecting user dependencies...",       "zh": "收集用户依赖..."},
+    "build.step.generating_boot":       {"en": "Generating boot script...",             "zh": "生成入口脚本..."},
+    "build.step.nuitka_compilation":    {"en": "Nuitka native compilation...",          "zh": "Nuitka 原生编译..."},
+    "build.step.organizing_output":     {"en": "Organizing output directory...",        "zh": "整理输出目录..."},
+    "build.step.copying_data":          {"en": "Copying game data...",                  "zh": "复制游戏数据..."},
+    "build.step.compiling_scripts":     {"en": "Compiling user scripts...",             "zh": "编译用户脚本..."},
+    "build.step.processing_splash":     {"en": "Processing splash items...",            "zh": "处理开场画面..."},
+    "build.step.fixing_scenes":         {"en": "Fixing scene paths...",                 "zh": "处理场景路径..."},
+    "build.step.generating_manifest":   {"en": "Generating manifest...",                "zh": "生成构建清单..."},
+    "build.step.cleaning_redundant":    {"en": "Cleaning redundant resources...",       "zh": "清理冗余资源..."},
+    "build.step.writing_marker":        {"en": "Writing build marker...",               "zh": "写入构建标记..."},
+    "build.step.cleaning_temp":         {"en": "Cleaning temp files...",                "zh": "清理临时文件..."},
+    "build.step.complete":              {"en": "Build complete!",                       "zh": "构建完成！"},
+    # Nuitka sub-steps
+    "build.step.checking_nuitka":       {"en": "Checking Nuitka...",                    "zh": "检查 Nuitka 可用性..."},
+    "build.step.preparing_staging":     {"en": "Preparing staging directory...",        "zh": "准备暂存目录..."},
+    "build.step.building_command":      {"en": "Building command...",                   "zh": "构建 Nuitka 命令..."},
+    "build.step.running_nuitka":        {"en": "Running Nuitka compilation...",         "zh": "执行 Nuitka 编译..."},
+    "build.step.injecting_libs":        {"en": "Injecting native engine libraries...",  "zh": "注入原生引擎库..."},
+    "build.step.injecting_jit":         {"en": "Injecting JIT runtime packages...",     "zh": "注入 JIT 运行时包..."},
+    "build.step.embedding_manifest":    {"en": "Embedding UTF-8 manifest...",           "zh": "嵌入 UTF-8 清单..."},
+    "build.step.signing_exe":           {"en": "Signing executable...",                 "zh": "签名可执行文件..."},
+    "build.step.cleaning_artifacts":    {"en": "Cleaning build artifacts...",           "zh": "清理编译产物..."},
+    "build.step.nuitka_complete":       {"en": "Compilation complete!",                 "zh": "Nuitka 编译完成！"},
 
     # ── Physics / Tags & Layers ───────────────────────────────────────
     "physics.title":                    {"en": "Physics Settings",          "zh": "物理设置"},

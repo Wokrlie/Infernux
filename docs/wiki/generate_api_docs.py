@@ -92,7 +92,7 @@ I18N = {
     "inherits":             {"en": "Inherits from",         "zh": "继承自"},
     "package":              {"en": "Package",               "zh": "包"},
     "packages":             {"en": "Packages",              "zh": "包"},
-    "version":              {"en": "Version 0.1",           "zh": "版本 0.1"},
+    "version":              {"en": "Version 0.1.2",         "zh": "版本 0.1.2"},
     "api_ref_title":        {"en": "Infernux Scripting API", "zh": "Infernux 脚本 API"},
     "api_ref_welcome":      {
         "en": "Welcome to the Infernux Scripting API Reference. Browse packages from the sidebar to see class documentation.",
@@ -1609,6 +1609,9 @@ PUBLIC_API_FUNCTIONS = {
     "add_component_menu",
     "execute_in_edit_mode",
     "disallow_multiple",
+    # ── JIT ──
+    "njit",
+    "warmup",
     # help_url, hide_field, icon → too trivial for standalone pages
 }
 

@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
-  <img src="https://img.shields.io/badge/version-0.1.1-orange.svg" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.1.2-orange.svg" alt="Version" />
   <img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform" />
   <img src="https://img.shields.io/badge/python-3.12+-brightgreen.svg" alt="Python" />
   <img src="https://img.shields.io/badge/C%2B%2B-17-blue.svg" alt="C++ 17" />
@@ -270,6 +270,7 @@ This is the main architectural promise of the engine: **high-level iteration wit
 - Prefab system (save/instantiate/override tracking)
 - Game UI system (Canvas, Text, Image, Button, event system)
 - Standalone game build via Nuitka
+- Numba JIT integration with `@njit` decorator, automatic fallback, and `.py` attribute for explicit Python path
 - Hub launcher and Windows installer
 
 ### In progress

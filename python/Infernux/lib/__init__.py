@@ -55,28 +55,60 @@ def _iter_dev_native_search_dirs():
             yield os.path.join(build_root, *prefix, config)
 
 
+_SYSTEM_DLL_CHECKS = (
+    ("MSVCP140.dll", "Install or repair the Microsoft Visual C++ Redistributable."),
+    ("VCRUNTIME140.dll", "Install or repair the Microsoft Visual C++ Redistributable."),
+    ("VCRUNTIME140_1.dll", "Install or repair the Microsoft Visual C++ Redistributable."),
+    ("vulkan-1.dll", "Install a current GPU driver or the Vulkan Runtime."),
+)
+
+_ENGINE_DLLS = (
+    "SDL3.dll",
+    "assimp-vc143-mt.dll",
+    "glslang.dll",
+    "SPIRV.dll",
+    "Jolt.dll",
+)
+
+
 def _collect_windows_native_load_hints():
     if sys.platform != "win32":
         return []
 
     hints = []
-    checks = (
-        ("MSVCP140.dll", "Install or repair the Microsoft Visual C++ Redistributable."),
-        ("VCRUNTIME140.dll", "Install or repair the Microsoft Visual C++ Redistributable."),
-        ("VCRUNTIME140_1.dll", "Install or repair the Microsoft Visual C++ Redistributable."),
-        ("vulkan-1.dll", "Install a current GPU driver or the Vulkan Runtime."),
-    )
 
-    for dll_name, remedy in checks:
+    for dll_name, remedy in _SYSTEM_DLL_CHECKS:
         try:
             ctypes.WinDLL(dll_name)
         except OSError:
-            hints.append(f"Missing {dll_name}. {remedy}")
+            hints.append(f"Missing system DLL: {dll_name}. {remedy}")
 
     if not glob.glob(os.path.join(lib_dir, "_Infernux*.pyd")):
         hints.append(f"Missing _Infernux*.pyd under {lib_dir}. Reinstall the Infernux wheel.")
 
+    for dll_name in _ENGINE_DLLS:
+        full = os.path.join(lib_dir, dll_name)
+        if not os.path.isfile(full):
+            hints.append(f"Missing engine DLL: {dll_name}. Reinstall the Infernux wheel.")
+        else:
+            try:
+                ctypes.WinDLL(full)
+            except OSError as e:
+                hints.append(
+                    f"Engine DLL present but failed to load: {dll_name} ({e}). "
+                    f"A dependency of this DLL may be missing."
+                )
+
     return hints
+
+
+def _list_lib_dir_contents():
+    try:
+        entries = sorted(os.listdir(lib_dir))
+        dlls = [e for e in entries if e.lower().endswith((".dll", ".pyd", ".so", ".dylib"))]
+        return dlls
+    except OSError:
+        return []
 
 
 def _raise_native_import_error(exc):
@@ -88,8 +120,8 @@ def _raise_native_import_error(exc):
 
     hints = _collect_windows_native_load_hints()
     if hints:
-        lines.append("Likely causes:")
-        lines.extend(f"- {hint}" for hint in hints)
+        lines.append("Diagnostic results:")
+        lines.extend(f"  - {hint}" for hint in hints)
     elif sys.platform == "darwin":
         if not glob.glob(os.path.join(lib_dir, "_Infernux*.so")):
             lines.append(f"Missing _Infernux*.so under {lib_dir}. Build the native module first.")
@@ -101,9 +133,55 @@ def _raise_native_import_error(exc):
             "Likely causes: a missing Vulkan runtime or missing Microsoft Visual C++ runtime DLLs."
         )
 
+    found = _list_lib_dir_contents()
+    if found:
+        lines.append(f"Native files found in lib directory ({len(found)}):")
+        lines.extend(f"  {f}" for f in found)
+    else:
+        lines.append("WARNING: No native files found in lib directory!")
+
     raise ImportError("\n".join(lines)) from exc
 
+
+def _preload_bundled_crt_dlls() -> None:
+    """Pre-load MSVC CRT DLLs bundled alongside ``_Infernux.pyd``.
+
+    On machines without a system-wide Visual C++ Redistributable install,
+    ``os.add_dll_directory()`` alone is not always sufficient —
+    ``_Infernux.pyd`` (and the engine DLLs it depends on) may still fail
+    to resolve ``vcruntime140.dll`` / ``msvcp140.dll`` at load time.
+
+    Explicitly loading them via ``ctypes.WinDLL`` before the ``from
+    ._Infernux import *`` guarantees they are resident in the process
+    and the dynamic linker can satisfy the dependency.
+    """
+    if sys.platform != "win32":
+        return
+
+    # Order matters: vcruntime first, then msvcp / concrt (they depend
+    # on vcruntime).
+    _CRT_LOAD_ORDER = (
+        "vcruntime140.dll",
+        "vcruntime140_1.dll",
+        "msvcp140.dll",
+        "msvcp140_1.dll",
+        "msvcp140_2.dll",
+        "msvcp140_atomic_wait.dll",
+        "msvcp140_codecvt_ids.dll",
+        "concrt140.dll",
+    )
+
+    for name in _CRT_LOAD_ORDER:
+        full = os.path.join(lib_dir, name)
+        if os.path.isfile(full):
+            try:
+                ctypes.WinDLL(full)
+            except OSError:
+                pass  # Best-effort; the import below will give a clear error.
+
+
 _register_native_search_dir(lib_dir)
+_preload_bundled_crt_dlls()
 
 try:
     from ._Infernux import *

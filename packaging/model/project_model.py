@@ -125,13 +125,9 @@ class ProjectModel:
             f.write("# Project Assets\n\nThis folder contains all the assets for the project.\n")
 
         # Create default project requirements
-        from Infernux.engine.project_requirements import _bundled_requirements_path
         req_path = os.path.join(project_dir, "ProjectSettings", "requirements.txt")
         if not os.path.isfile(req_path):
-            bundled = _bundled_requirements_path()
-            if os.path.isfile(bundled):
-                import shutil as _shutil
-                _shutil.copy2(bundled, req_path)
+            self._copy_bundled_requirements(req_path, engine_version)
 
         # Create .ini file in project path
         ini_path = os.path.join(project_dir, f"{project_name}.ini")
@@ -163,6 +159,41 @@ class ProjectModel:
     # -----------------------------------------------------------------
     # Private helpers
     # -----------------------------------------------------------------
+
+    def _copy_bundled_requirements(self, dest_path: str, engine_version: str) -> None:
+        """Copy the default requirements.txt to *dest_path*.
+
+        Resolves the file from the source tree (dev mode) or extracts it
+        from the engine wheel, avoiding any ``import Infernux`` in the Hub
+        process (which doesn't have the engine package installed).
+        """
+        import zipfile
+
+        # 1) Dev mode: resolve from the source tree next to this repo
+        engine_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        source_req = os.path.join(
+            engine_root, "python", "Infernux", "resources", "supports", "requirements.txt",
+        )
+        if os.path.isfile(source_req):
+            shutil.copy2(source_req, dest_path)
+            return
+
+        # 2) Extract from the wheel (a zip file)
+        wheel = ""
+        if engine_version and self.version_manager is not None:
+            wheel = self.version_manager.get_wheel_path(engine_version) or ""
+        if not wheel and not is_frozen():
+            wheel = _find_dev_wheel()
+        if wheel and os.path.isfile(wheel):
+            try:
+                with zipfile.ZipFile(wheel) as zf:
+                    for name in zf.namelist():
+                        if name.endswith("resources/supports/requirements.txt"):
+                            with zf.open(name) as src, open(dest_path, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
+                            return
+            except zipfile.BadZipFile:
+                pass
 
     @staticmethod
     def _get_project_python(project_dir: str) -> str:

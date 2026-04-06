@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
-  <img src="https://img.shields.io/badge/version-0.1.1-orange.svg" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.1.2-orange.svg" alt="Version" />
   <img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform" />
   <img src="https://img.shields.io/badge/python-3.12+-brightgreen.svg" alt="Python" />
   <img src="https://img.shields.io/badge/C%2B%2B-17-blue.svg" alt="C++ 17" />
@@ -217,6 +217,7 @@ C++ 引擎核心
 - 预制体系统（保存/实例化/覆盖追踪）
 - 游戏 UI 系统（Canvas、Text、Image、Button、事件系统）
 - 基于 Nuitka 的独立游戏构建
+- Numba JIT 集成，提供 `@njit` 装饰器、自动降级回退、`.py` 属性显式调用纯 Python 路径
 - Hub 启动器与 Windows 安装器
 
 ### 进行中

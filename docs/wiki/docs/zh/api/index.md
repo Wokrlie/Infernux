@@ -1,7 +1,7 @@
 # Infernux 脚本 API
 
 <div class="class-info">
-版本 0.1
+版本 0.1.2
  &nbsp;|&nbsp; <a href="../../en/api/index.html">English</a>
 </div>
 
@@ -25,6 +25,7 @@
 | Infernux.debug | Debug |
 | Infernux.gizmos | Gizmos |
 | Infernux.input | KeyCode, Input |
+| Infernux.jit | njit, warmup |
 | Infernux.math | vector3, vector2, vector4, quaternion |
 | Infernux.mathf | Mathf |
 | Infernux.physics | Physics |
