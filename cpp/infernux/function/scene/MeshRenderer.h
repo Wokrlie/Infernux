@@ -275,7 +275,7 @@ class MeshRenderer : public Component
     }
 
     /// @brief Get world-space bounding box (transformed by GameObject)
-    [[nodiscard]] void GetWorldBounds(glm::vec3 &outMin, glm::vec3 &outMax) const;
+    void GetWorldBounds(glm::vec3 &outMin, glm::vec3 &outMax) const;
 
     /// @brief Recompute local bounds from inline vertex positions.
     void ComputeLocalBoundsFromInlineVertices();
