@@ -3,6 +3,7 @@
 #include "Camera.h"
 #include "GameObject.h"
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -298,6 +299,16 @@ class Scene
     void EditorUpdateObject(GameObject *obj, float deltaTime);
     class Component *FindComponentByID(uint64_t componentId) const;
     bool IsPendingDestroy(const GameObject *obj) const;
+
+    /// @brief Shared recursive GameObject builder from JSON string.
+    /// @param preserveIds If true, restores original IDs (Deserialize); otherwise generates new ones (Instantiate).
+    std::unique_ptr<GameObject> BuildGameObjectFromJson(const std::string &jsonStr, bool preserveIds);
+
+    /// @brief Internal overload operating on an already-parsed JSON value.
+    std::unique_ptr<GameObject> BuildGameObjectFromJsonImpl(const nlohmann::json &objJson, bool preserveIds);
+
+    /// @brief Recursively register all objects in a subtree with Scene's lookup map.
+    void RegisterObjectSubtree(GameObject *root);
 
     std::string m_name = "Untitled Scene";
 

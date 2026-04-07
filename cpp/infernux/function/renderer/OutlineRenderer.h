@@ -170,6 +170,10 @@ class OutlineRenderer
     void RenderOutlineMask(VkCommandBuffer cmdBuf, const std::vector<DrawCall> &drawCalls);
     void RenderOutlineComposite(VkCommandBuffer cmdBuf);
 
+    /// Begin a render pass with a full-viewport and scissor covering the scene target.
+    void BeginRenderPassWithFullViewport(VkCommandBuffer cmdBuf, VkRenderPass rp, VkFramebuffer fb,
+                                         const VkClearValue &clearVal);
+
     // ========================================================================
     // References (non-owning)
     // ========================================================================

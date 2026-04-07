@@ -200,6 +200,14 @@ def find_enum_index(members, current_value) -> int:
 #  Unified serialized-field renderer
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _label_or_fullwidth(ctx, display_name, lw, has_visible_label):
+    """Render field label or set full-width for the next item."""
+    if has_visible_label:
+        field_label(ctx, display_name, lw)
+    else:
+        ctx.set_next_item_width(-1)
+
+
 def render_serialized_field(
     ctx: InxGUIContext,
     wid: str,
@@ -233,10 +241,7 @@ def render_serialized_field(
 
     # ── FLOAT ──────────────────────────────────────────────────────────
     if ft == FieldType.FLOAT:
-        if has_visible_label:
-            field_label(ctx, display_name, lw)
-        else:
-            ctx.set_next_item_width(-1)
+        _label_or_fullwidth(ctx, display_name, lw, has_visible_label)
         speed = getattr(metadata, "drag_speed", None) or DRAG_SPEED_DEFAULT
         slider = getattr(metadata, "slider", False)
         if metadata.range:
@@ -257,10 +262,7 @@ def render_serialized_field(
 
     # ── INT ────────────────────────────────────────────────────────────
     elif ft == FieldType.INT:
-        if has_visible_label:
-            field_label(ctx, display_name, lw)
-        else:
-            ctx.set_next_item_width(-1)
+        _label_or_fullwidth(ctx, display_name, lw, has_visible_label)
         speed = getattr(metadata, "drag_speed", None) or DRAG_SPEED_INT
         slider = getattr(metadata, "slider", False)
         if metadata.range:
@@ -285,10 +287,7 @@ def render_serialized_field(
 
     # ── STRING ─────────────────────────────────────────────────────────
     elif ft == FieldType.STRING:
-        if has_visible_label:
-            field_label(ctx, display_name, lw)
-        else:
-            ctx.set_next_item_width(-1)
+        _label_or_fullwidth(ctx, display_name, lw, has_visible_label)
         multiline = getattr(metadata, "multiline", False)
         if multiline:
             new_value = ctx.input_text_multiline(
@@ -364,10 +363,7 @@ def render_serialized_field(
             else:
                 member_names = [get_enum_member_name(m) for m in members]
             current_idx = find_enum_index(members, current_value)
-            if has_visible_label:
-                field_label(ctx, display_name, lw)
-            else:
-                ctx.set_next_item_width(-1)
+            _label_or_fullwidth(ctx, display_name, lw, has_visible_label)
             new_idx = ctx.combo(wid, current_idx, member_names, -1)
             if new_idx != current_idx:
                 new_value = members[new_idx]
@@ -383,10 +379,7 @@ def render_serialized_field(
             )
         else:
             r, g, b, a = 1.0, 1.0, 1.0, 1.0
-        if has_visible_label:
-            field_label(ctx, display_name, lw)
-        else:
-            ctx.set_next_item_width(-1)
+        _label_or_fullwidth(ctx, display_name, lw, has_visible_label)
         allow_hdr = getattr(metadata, 'hdr', False)
         nr, ng, nb, na = _render_color_bar(ctx, wid, r, g, b, a, allow_hdr=allow_hdr)
         if (nr, ng, nb, na) != (r, g, b, a):
@@ -811,6 +804,19 @@ def is_batch_renderable(field_type) -> bool:
     return field_type in _FIELD_TYPE_TO_PROP
 
 
+_VEC_KEYS = ("f", "f2", "f3", "f4")
+_VEC_ATTRS = ("x", "y", "z", "w")
+
+
+def _pack_vec_components(desc, current_value, n, default=0.0):
+    """Pack *n* vector components into *desc* using standard keys."""
+    for i in range(n):
+        if current_value is not None:
+            desc[_VEC_KEYS[i]] = float(getattr(current_value, _VEC_ATTRS[i]))
+        else:
+            desc[_VEC_KEYS[i]] = default
+
+
 def build_scalar_desc(
     wid: str,
     display_name: str,
@@ -841,26 +847,11 @@ def build_scalar_desc(
     elif prop_type == PROP_STRING:
         desc["s"] = str(current_value) if current_value else ""
     elif prop_type == PROP_VEC2:
-        if current_value is not None:
-            desc["f"] = float(current_value.x)
-            desc["f2"] = float(current_value.y)
-        else:
-            desc["f"] = 0.0; desc["f2"] = 0.0
+        _pack_vec_components(desc, current_value, 2)
     elif prop_type == PROP_VEC3:
-        if current_value is not None:
-            desc["f"] = float(current_value.x)
-            desc["f2"] = float(current_value.y)
-            desc["f3"] = float(current_value.z)
-        else:
-            desc["f"] = 0.0; desc["f2"] = 0.0; desc["f3"] = 0.0
+        _pack_vec_components(desc, current_value, 3)
     elif prop_type == PROP_VEC4:
-        if current_value is not None:
-            desc["f"] = float(current_value.x)
-            desc["f2"] = float(current_value.y)
-            desc["f3"] = float(current_value.z)
-            desc["f4"] = float(current_value.w)
-        else:
-            desc["f"] = 0.0; desc["f2"] = 0.0; desc["f3"] = 0.0; desc["f4"] = 0.0
+        _pack_vec_components(desc, current_value, 4)
     elif prop_type == PROP_ENUM:
         enum_cls = metadata.enum_type
         if isinstance(enum_cls, str):
