@@ -287,6 +287,11 @@ class Scene
     void CollectAllObjects(GameObject *obj, std::vector<GameObject *> &result) const;
     void QueueStartObject(GameObject *obj);
     void StartObject(GameObject *obj);
+
+    /// @brief Shared recursive traversal for all update variants.
+    /// @param updateMethod Pointer-to-member on GameObject (e.g. &GameObject::Update).
+    void TraverseActiveObjects(GameObject *obj, float dt, void (GameObject::*updateMethod)(float));
+
     void UpdateObject(GameObject *obj, float deltaTime);
     void FixedUpdateObject(GameObject *obj, float fixedDeltaTime);
     void LateUpdateObject(GameObject *obj, float deltaTime);

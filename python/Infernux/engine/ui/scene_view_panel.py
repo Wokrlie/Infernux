@@ -381,114 +381,14 @@ class SceneViewPanel(EditorPanel):
             vp = capture_viewport_info(ctx)
             is_scene_hovered = vp.is_hovered
 
-            ctx.set_cursor_pos_x(cursor_start_x + 8)
-            ctx.set_cursor_pos_y(cursor_start_y + 8)
-            overlay_hovered = self._draw_gizmo_overlay(ctx)
+            overlay_hovered = self._render_overlays_and_shortcuts(
+                ctx, vp, cursor_start_x, cursor_start_y, scene_width, delta_time)
 
-            # Prefab mode overlay banner
-            from Infernux.engine.scene_manager import SceneFileManager
-            scene_file_manager = SceneFileManager.instance()
-            if scene_file_manager and scene_file_manager.is_prefab_mode:
-                ctx.set_cursor_pos_x(cursor_start_x + scene_width / 2.0 - 60.0)
-                ctx.set_cursor_pos_y(cursor_start_y + 8.0)
-                
-                # Use a prominent color for the exit button
-                ctx.push_style_color(ImGuiCol.Button, *Theme.PREFAB_BTN_NORMAL)
-                ctx.push_style_color(ImGuiCol.ButtonHovered, *Theme.PREFAB_BTN_HOVERED)
-                ctx.push_style_color(ImGuiCol.ButtonActive, *Theme.PREFAB_BTN_ACTIVE)
-                
-                if ctx.button(t("scene_view.exit_prefab_mode")):
-                    scene_file_manager.exit_prefab_mode_with_undo()
-                if ctx.is_item_hovered() and ctx.is_mouse_button_down(0):
-                    overlay_hovered = True
-                    
-                ctx.pop_style_color(3)
+            gizmo_consumed = self._process_gizmo_and_camera(
+                ctx, vp, delta_time, is_scene_hovered, overlay_hovered)
 
-            self._draw_pos_overlay(ctx, vp)
-
-            # Unity-style tool switching shortcuts (Q/W/E/R)
-            if not ctx.want_text_input() and not ctx.is_mouse_button_down(1):
-                if ctx.is_key_pressed(self.KEY_Q):
-                    self._set_tool_mode(TOOL_NONE)
-                elif ctx.is_key_pressed(self.KEY_W):
-                    self._set_tool_mode(TOOL_TRANSLATE)
-                elif ctx.is_key_pressed(self.KEY_E):
-                    self._set_tool_mode(TOOL_ROTATE)
-                elif ctx.is_key_pressed(self.KEY_R):
-                    self._set_tool_mode(TOOL_SCALE)
-
-                ctrl = ctx.is_key_down(_keys.KEY_LEFT_CTRL) or ctx.is_key_down(_keys.KEY_RIGHT_CTRL)
-                if ctrl and ctx.is_key_pressed(_keys.KEY_F):
-                    self._align_object_to_camera()
-
-            # Gizmo interaction
-            left_down = ctx.is_mouse_button_down(0)
-            left_clicked = left_down and not self._was_left_down
-            self._was_left_down = left_down
-            gizmo_consumed = False
-
-            if self._engine:
-                local_mx, local_my = vp.mouse_local(ctx)
-                gizmo_consumed = self._update_gizmo_interaction(
-                    ctx, local_mx, local_my, vp.width, vp.height,
-                    left_down, left_clicked, is_scene_hovered)
-            
-            # Camera drag
-            mgr = InputManager.instance()
-            right_down = mgr.get_mouse_button(1)
-            middle_down = mgr.get_mouse_button(2)
-            if is_scene_hovered and not overlay_hovered and (right_down or middle_down) and not self._is_camera_dragging:
-                self._is_camera_dragging = True
-                self._fly_to_active = False
-                self._begin_camera_capture(ctx)
-            
-            if is_scene_hovered or self._is_camera_dragging:
-                self._process_camera_input(ctx, delta_time)
-
-            if self._is_camera_dragging and not right_down and not middle_down:
-                self._is_camera_dragging = False
-                self._end_camera_capture(ctx)
-
-            if (is_scene_hovered and not gizmo_consumed
-                    and not overlay_hovered
-                    and ctx.is_mouse_button_clicked(0)
-                    and not self._box_select_active):
-                picked_id = self._pick_scene_object(ctx, vp)
-                if picked_id:
-                    if self._on_object_picked:
-                        self._on_object_picked(picked_id, False)
-                else:
-                    if self._on_object_picked:
-                        self._on_object_picked(0, False)
-
-            # Box-select
-            if self._box_select_active:
-                lx, ly = vp.mouse_local(ctx)
-                self._box_select_end = (lx, ly)
-
-                if not ctx.is_mouse_button_down(0):
-                    self._finalize_box_select(ctx, vp)
-                    self._box_select_active = False
-                else:
-                    sx, sy = self._box_select_start
-                    ex, ey = self._box_select_end
-                    min_x = vp.image_min_x + min(sx, ex)
-                    min_y = vp.image_min_y + min(sy, ey)
-                    max_x = vp.image_min_x + max(sx, ex)
-                    max_y = vp.image_min_y + max(sy, ey)
-                    ctx.draw_filled_rect(min_x, min_y, max_x, max_y,
-                                         0.3, 0.5, 0.9, 0.15)
-                    ctx.draw_rect(min_x, min_y, max_x, max_y,
-                                  0.3, 0.5, 0.9, 0.8, thickness=1.0)
-
-            # Play-mode border
-            if _play_border_clr is not None:
-                ctx.draw_rect(
-                    vp.image_min_x, vp.image_min_y,
-                    vp.image_max_x, vp.image_max_y,
-                    *_play_border_clr,
-                    thickness=Theme.BORDER_THICKNESS,
-                )
+            self._handle_picking_and_selection(
+                ctx, vp, gizmo_consumed, overlay_hovered, is_scene_hovered, _play_border_clr)
 
         else:
             # Placeholder when texture not ready
@@ -496,6 +396,128 @@ class SceneViewPanel(EditorPanel):
             ctx.set_cursor_pos_x(cursor_start_x + 8)
             ctx.set_cursor_pos_y(cursor_start_y + 8)
             ctx.label(t("scene_view.loading"))
+
+    def _render_overlays_and_shortcuts(self, ctx, vp, cursor_start_x, cursor_start_y, scene_width, delta_time):
+        """Draw gizmo/pos overlays, prefab banner, and handle tool/camera shortcuts.
+
+        Returns True if an overlay element is hovered.
+        """
+        ctx.set_cursor_pos_x(cursor_start_x + 8)
+        ctx.set_cursor_pos_y(cursor_start_y + 8)
+        overlay_hovered = self._draw_gizmo_overlay(ctx)
+
+        # Prefab mode overlay banner
+        from Infernux.engine.scene_manager import SceneFileManager
+        scene_file_manager = SceneFileManager.instance()
+        if scene_file_manager and scene_file_manager.is_prefab_mode:
+            ctx.set_cursor_pos_x(cursor_start_x + scene_width / 2.0 - 60.0)
+            ctx.set_cursor_pos_y(cursor_start_y + 8.0)
+
+            # Use a prominent color for the exit button
+            ctx.push_style_color(ImGuiCol.Button, *Theme.PREFAB_BTN_NORMAL)
+            ctx.push_style_color(ImGuiCol.ButtonHovered, *Theme.PREFAB_BTN_HOVERED)
+            ctx.push_style_color(ImGuiCol.ButtonActive, *Theme.PREFAB_BTN_ACTIVE)
+
+            if ctx.button(t("scene_view.exit_prefab_mode")):
+                scene_file_manager.exit_prefab_mode_with_undo()
+            if ctx.is_item_hovered() and ctx.is_mouse_button_down(0):
+                overlay_hovered = True
+
+            ctx.pop_style_color(3)
+
+        self._draw_pos_overlay(ctx, vp)
+
+        # Unity-style tool switching shortcuts (Q/W/E/R)
+        if not ctx.want_text_input() and not ctx.is_mouse_button_down(1):
+            if ctx.is_key_pressed(self.KEY_Q):
+                self._set_tool_mode(TOOL_NONE)
+            elif ctx.is_key_pressed(self.KEY_W):
+                self._set_tool_mode(TOOL_TRANSLATE)
+            elif ctx.is_key_pressed(self.KEY_E):
+                self._set_tool_mode(TOOL_ROTATE)
+            elif ctx.is_key_pressed(self.KEY_R):
+                self._set_tool_mode(TOOL_SCALE)
+
+            ctrl = ctx.is_key_down(_keys.KEY_LEFT_CTRL) or ctx.is_key_down(_keys.KEY_RIGHT_CTRL)
+            if ctrl and ctx.is_key_pressed(_keys.KEY_F):
+                self._align_object_to_camera()
+
+        return overlay_hovered
+
+    def _process_gizmo_and_camera(self, ctx, vp, delta_time, is_scene_hovered, overlay_hovered):
+        """Handle gizmo interaction and camera drag. Returns whether gizmo consumed the input."""
+        left_down = ctx.is_mouse_button_down(0)
+        left_clicked = left_down and not self._was_left_down
+        self._was_left_down = left_down
+        gizmo_consumed = False
+
+        if self._engine:
+            local_mx, local_my = vp.mouse_local(ctx)
+            gizmo_consumed = self._update_gizmo_interaction(
+                ctx, local_mx, local_my, vp.width, vp.height,
+                left_down, left_clicked, is_scene_hovered)
+
+        # Camera drag
+        mgr = InputManager.instance()
+        right_down = mgr.get_mouse_button(1)
+        middle_down = mgr.get_mouse_button(2)
+        if is_scene_hovered and not overlay_hovered and (right_down or middle_down) and not self._is_camera_dragging:
+            self._is_camera_dragging = True
+            self._fly_to_active = False
+            self._begin_camera_capture(ctx)
+
+        if is_scene_hovered or self._is_camera_dragging:
+            self._process_camera_input(ctx, delta_time)
+
+        if self._is_camera_dragging and not right_down and not middle_down:
+            self._is_camera_dragging = False
+            self._end_camera_capture(ctx)
+
+        return gizmo_consumed
+
+    def _handle_picking_and_selection(self, ctx, vp, gizmo_consumed, overlay_hovered,
+                                      is_scene_hovered, play_border_clr):
+        """Handle object picking, box-select, and play-mode border drawing."""
+        if (is_scene_hovered and not gizmo_consumed
+                and not overlay_hovered
+                and ctx.is_mouse_button_clicked(0)
+                and not self._box_select_active):
+            picked_id = self._pick_scene_object(ctx, vp)
+            if picked_id:
+                if self._on_object_picked:
+                    self._on_object_picked(picked_id, False)
+            else:
+                if self._on_object_picked:
+                    self._on_object_picked(0, False)
+
+        # Box-select
+        if self._box_select_active:
+            lx, ly = vp.mouse_local(ctx)
+            self._box_select_end = (lx, ly)
+
+            if not ctx.is_mouse_button_down(0):
+                self._finalize_box_select(ctx, vp)
+                self._box_select_active = False
+            else:
+                sx, sy = self._box_select_start
+                ex, ey = self._box_select_end
+                min_x = vp.image_min_x + min(sx, ex)
+                min_y = vp.image_min_y + min(sy, ey)
+                max_x = vp.image_min_x + max(sx, ex)
+                max_y = vp.image_min_y + max(sy, ey)
+                ctx.draw_filled_rect(min_x, min_y, max_x, max_y,
+                                     0.3, 0.5, 0.9, 0.15)
+                ctx.draw_rect(min_x, min_y, max_x, max_y,
+                              0.3, 0.5, 0.9, 0.8, thickness=1.0)
+
+        # Play-mode border
+        if play_border_clr is not None:
+            ctx.draw_rect(
+                vp.image_min_x, vp.image_min_y,
+                vp.image_max_x, vp.image_max_y,
+                *play_border_clr,
+                thickness=Theme.BORDER_THICKNESS,
+            )
     
     def _draw_gizmo_overlay(self, ctx: InxGUIContext) -> bool:
         """Draw the top-left gizmo controls and return whether they are hovered."""

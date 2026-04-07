@@ -263,15 +263,21 @@ class GameViewPanel(EditorPanel):
             ctx.label(t("game_view.engine_not_init"))
             return
 
-        viewport_hovered = False
-        viewport_clicked = False
-
         # Ensure native Game rendering is enabled once the panel has rendered.
         # Do not disable it on transient dock/tab invisibility because scene
         # switches can temporarily interrupt panel visibility for a frame.
         self._set_game_render_active(True)
 
-        # ── Resolution toolbar row ──
+        self._render_resolution_toolbar(ctx)
+        target_w, target_h, fit_scale = self._render_scale_toolbar(ctx)
+        self._render_fps_counter(ctx)
+
+        ctx.new_line()
+
+        self._render_game_viewport(ctx, target_w, target_h, fit_scale)
+
+    def _render_resolution_toolbar(self, ctx):
+        """Resolution preset combo and optional custom width/height inputs."""
         old_idx = self._selected_resolution_idx
         ctx.set_next_item_width(140)
         self._selected_resolution_idx = ctx.combo("##Resolution", self._selected_resolution_idx, self._PRESET_NAMES, -1)
@@ -292,7 +298,11 @@ class GameViewPanel(EditorPanel):
             if self._custom_width != w_old or self._custom_height != h_old:
                 self._save_resolution_settings()
 
-        # ── Scale slider row ──
+    def _render_scale_toolbar(self, ctx):
+        """Scale slider, percentage label, and Fit button.
+
+        Returns ``(target_w, target_h, fit_scale)``.
+        """
         avail_width = ctx.get_content_region_avail_width()
         avail_height = ctx.get_content_region_avail_height()
         target_w, target_h = self._current_target_resolution()
@@ -326,10 +336,10 @@ class GameViewPanel(EditorPanel):
         if pushed_fit_style:
             ctx.pop_style_color(1)
 
-        # ── FPS counter (right-aligned, Unity-style) ──
-        # Total FPS = real wall-clock frame rate (all work including editor panels).
-        # Game FPS  = estimated FPS from game-only phases (scripts + physics +
-        #             rendering), excluding editor panel overhead.
+        return target_w, target_h, fit_scale
+
+    def _render_fps_counter(self, ctx):
+        """FPS counter (right-aligned, Unity-style)."""
         dt = Time.unscaled_delta_time
         game_dt = Time.game_delta_time
         if dt > 0.0:
@@ -359,8 +369,8 @@ class GameViewPanel(EditorPanel):
             ctx.same_line(fps_x)
             ctx.label(fps_text)
 
-        ctx.new_line()
-
+    def _render_game_viewport(self, ctx, target_w, target_h, fit_scale):
+        """Render the game texture, screen UI, and route input events."""
         # Recompute fit after the toolbar row has consumed layout height.
         viewport_avail_width = ctx.get_content_region_avail_width()
         viewport_avail_height = ctx.get_content_region_avail_height()

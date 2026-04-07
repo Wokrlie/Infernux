@@ -333,32 +333,28 @@ void Scene::FixedUpdate(float fixedDeltaTime)
     }
 }
 
-void Scene::FixedUpdateObject(GameObject *obj, float fixedDeltaTime)
+void Scene::TraverseActiveObjects(GameObject *obj, float dt, void (GameObject::*updateMethod)(float))
 {
     if (!obj || !obj->IsActiveInHierarchy() || IsPendingDestroy(obj))
         return;
 
-    obj->FixedUpdate(fixedDeltaTime);
+    (obj->*updateMethod)(dt);
 
     const auto &children = obj->GetChildren();
     const size_t childCount = children.size();
     for (size_t i = 0; i < childCount && i < children.size(); ++i) {
-        FixedUpdateObject(children[i].get(), fixedDeltaTime);
+        TraverseActiveObjects(children[i].get(), dt, updateMethod);
     }
+}
+
+void Scene::FixedUpdateObject(GameObject *obj, float fixedDeltaTime)
+{
+    TraverseActiveObjects(obj, fixedDeltaTime, &GameObject::FixedUpdate);
 }
 
 void Scene::UpdateObject(GameObject *obj, float deltaTime)
 {
-    if (!obj || !obj->IsActiveInHierarchy() || IsPendingDestroy(obj))
-        return;
-
-    obj->Update(deltaTime);
-
-    const auto &children = obj->GetChildren();
-    const size_t childCount = children.size();
-    for (size_t i = 0; i < childCount && i < children.size(); ++i) {
-        UpdateObject(children[i].get(), deltaTime);
-    }
+    TraverseActiveObjects(obj, deltaTime, &GameObject::Update);
 }
 
 void Scene::LateUpdate(float deltaTime)
@@ -389,30 +385,12 @@ void Scene::EditorUpdate(float deltaTime)
 
 void Scene::LateUpdateObject(GameObject *obj, float deltaTime)
 {
-    if (!obj || !obj->IsActiveInHierarchy() || IsPendingDestroy(obj))
-        return;
-
-    obj->LateUpdate(deltaTime);
-
-    const auto &children = obj->GetChildren();
-    const size_t childCount = children.size();
-    for (size_t i = 0; i < childCount && i < children.size(); ++i) {
-        LateUpdateObject(children[i].get(), deltaTime);
-    }
+    TraverseActiveObjects(obj, deltaTime, &GameObject::LateUpdate);
 }
 
 void Scene::EditorUpdateObject(GameObject *obj, float deltaTime)
 {
-    if (!obj || !obj->IsActiveInHierarchy() || IsPendingDestroy(obj))
-        return;
-
-    obj->EditorUpdate(deltaTime);
-
-    const auto &children = obj->GetChildren();
-    const size_t childCount = children.size();
-    for (size_t i = 0; i < childCount && i < children.size(); ++i) {
-        EditorUpdateObject(children[i].get(), deltaTime);
-    }
+    TraverseActiveObjects(obj, deltaTime, &GameObject::EditorUpdate);
 }
 
 void Scene::ProcessPendingDestroys()

@@ -1051,8 +1051,86 @@ def _list_type_hint(element_type, metadata):
     return "Element"
 
 
-def _render_list_field(ctx: InxGUIContext, comp, field_name: str, metadata, current_value, lw: float):
+def _render_reference_list_item(ctx, field_name, index, item, items, metadata, element_type):
+    """Render a single reference-type list element (GameObject, Material, etc.).
+
+    Mutates *items* in-place on drop/pick/clear. Returns True if changed.
+    """
+    from Infernux.components.serialized_field import FieldType
+    from .igui import IGUI
+    changed = False
+    _req = metadata.component_type if element_type == FieldType.COMPONENT else metadata.required_component
+
+    def _replace_item(payload, _index=index, _req=_req):
+        nonlocal changed
+        value = _create_reference_value_from_payload(element_type, payload, _req)
+        if value is not None:
+            items[_index] = value
+            changed = True
+
+    _li_scene, _li_assets = _make_list_picker_providers(element_type, metadata)
+
+    def _li_on_pick(value, _index=index, _et=element_type, _req=_req):
+        nonlocal changed
+        ref = _create_list_pick_ref(_et, value, _req)
+        if ref is not None:
+            items[_index] = ref
+            changed = True
+
+    def _li_on_clear(_index=index, _et=element_type):
+        nonlocal changed
+        items[_index] = _make_list_default_element(metadata, _et)
+        changed = True
+
+    IGUI.object_field(
+        ctx,
+        f"list_{field_name}_{index}",
+        _get_reference_display_name(element_type, item),
+        _list_type_hint(element_type, metadata),
+        accept=_list_drag_drop_type(element_type),
+        on_drop=_replace_item,
+        picker_scene_items=_li_scene,
+        picker_asset_items=_li_assets,
+        on_pick=_li_on_pick,
+        on_clear=_li_on_clear,
+    )
+    return changed
+
+
+def _render_serializable_list_item(ctx, field_name, index, item, items, metadata):
+    """Render a single SERIALIZABLE_OBJECT list element with nested fields.
+
+    Mutates *items[index]* in-place on change. Returns True if changed.
+    """
     import copy as _copy
+    so_class = type(item) if item is not None else metadata.element_class
+    so_label = f"[{index}]" + (f" ({so_class.__name__})" if so_class else "")
+    if not render_compact_section_header(ctx, so_label, level="tertiary"):
+        return False
+    from Infernux.components.serialized_field import get_serialized_fields as _gsf
+    if not so_class or item is None:
+        return False
+    so_fields = _gsf(so_class)
+    so_lw = max_label_w(ctx, list(so_fields.keys())) if so_fields else 0.0
+    elem_changes = {}
+    for so_fn, so_meta in so_fields.items():
+        so_val = getattr(item, so_fn, so_meta.default)
+        new_val = render_serialized_field(
+            ctx, f"##{field_name}_{index}_{so_fn}", so_fn,
+            so_meta, so_val, so_lw,
+        )
+        if has_field_changed(so_meta.field_type, so_val, new_val):
+            elem_changes[so_fn] = new_val
+    if not elem_changes:
+        return False
+    edited = _copy.deepcopy(item)
+    for fn, fv in elem_changes.items():
+        setattr(edited, fn, fv)
+    items[index] = edited
+    return True
+
+
+def _render_list_field(ctx: InxGUIContext, comp, field_name: str, metadata, current_value, lw: float):
     from Infernux.components.serialized_field import FieldType
     from .igui import IGUI
 
@@ -1144,64 +1222,11 @@ def _render_list_field(ctx: InxGUIContext, comp, field_name: str, metadata, curr
             ctx.end_drag_drop_source()
 
         if element_type in reference_types:
-            _req = metadata.component_type if element_type == FieldType.COMPONENT else metadata.required_component
-            def _replace_item(payload, _index=index, _req=_req):
-                nonlocal changed
-                value = _create_reference_value_from_payload(element_type, payload, _req)
-                if value is not None:
-                    items[_index] = value
-                    changed = True
-
-            # Build picker providers for list items
-            _li_scene, _li_assets = _make_list_picker_providers(element_type, metadata)
-
-            def _li_on_pick(value, _index=index, _et=element_type, _req=_req):
-                nonlocal changed
-                ref = _create_list_pick_ref(_et, value, _req)
-                if ref is not None:
-                    items[_index] = ref
-                    changed = True
-
-            def _li_on_clear(_index=index, _et=element_type):
-                nonlocal changed
-                items[_index] = _make_list_default_element(metadata, _et)
+            if _render_reference_list_item(ctx, field_name, index, item, items, metadata, element_type):
                 changed = True
-
-            IGUI.object_field(
-                ctx,
-                f"list_{field_name}_{index}",
-                _get_reference_display_name(element_type, item),
-                _list_type_hint(element_type, metadata),
-                accept=_list_drag_drop_type(element_type),
-                on_drop=_replace_item,
-                picker_scene_items=_li_scene,
-                picker_asset_items=_li_assets,
-                on_pick=_li_on_pick,
-                on_clear=_li_on_clear,
-            )
         elif element_type == FieldType.SERIALIZABLE_OBJECT:
-            so_class = type(item) if item is not None else metadata.element_class
-            so_label = f"[{index}]" + (f" ({so_class.__name__})" if so_class else "")
-            if render_compact_section_header(ctx, so_label, level="tertiary"):
-                from Infernux.components.serialized_field import get_serialized_fields as _gsf
-                if so_class and item is not None:
-                    so_fields = _gsf(so_class)
-                    so_lw = max_label_w(ctx, list(so_fields.keys())) if so_fields else 0.0
-                    elem_changes = {}
-                    for so_fn, so_meta in so_fields.items():
-                        so_val = getattr(item, so_fn, so_meta.default)
-                        new_val = render_serialized_field(
-                            ctx, f"##{field_name}_{index}_{so_fn}", so_fn,
-                            so_meta, so_val, so_lw,
-                        )
-                        if has_field_changed(so_meta.field_type, so_val, new_val):
-                            elem_changes[so_fn] = new_val
-                    if elem_changes:
-                        edited = _copy.deepcopy(item)
-                        for fn, fv in elem_changes.items():
-                            setattr(edited, fn, fv)
-                        items[index] = edited
-                        changed = True
+            if _render_serializable_list_item(ctx, field_name, index, item, items, metadata):
+                changed = True
         else:
             new_item = render_serialized_field(
                 ctx, f"##{field_name}_{index}", "", element_meta, item, 0.0,
