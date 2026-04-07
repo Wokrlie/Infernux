@@ -523,33 +523,9 @@ void OutlineRenderer::CreateOutlinePipelines()
             MakeShaderStageInfo(VK_SHADER_STAGE_VERTEX_BIT, m_core->GetShaderModule("outline_mask", "vertex")),
             MakeShaderStageInfo(VK_SHADER_STAGE_FRAGMENT_BIT, m_core->GetShaderModule("outline_mask", "fragment")),
         };
-        MeshVertexInputState vertexInput;
-        VkPipelineInputAssemblyStateCreateInfo inputAssembly = MakeTriangleListInputAssembly();
-        DynamicViewportState viewportState;
-        VkPipelineRasterizationStateCreateInfo raster = MakeRasterizationState(VK_CULL_MODE_NONE);
-        VkPipelineDepthStencilStateCreateInfo depthStencil = MakeDepthStencilState(VK_FALSE, VK_FALSE);
-        VkPipelineMultisampleStateCreateInfo multisampling = MakeMultisampleState(VK_SAMPLE_COUNT_1_BIT);
-        VkPipelineColorBlendAttachmentState colorBlendAttach = MakeOpaqueColorBlendAttachment();
-        VkPipelineColorBlendStateCreateInfo colorBlend = MakeColorBlendState(colorBlendAttach);
 
-        VkGraphicsPipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-        pipelineInfo.stageCount = static_cast<uint32_t>(stages.size());
-        pipelineInfo.pStages = stages.data();
-        pipelineInfo.pVertexInputState = &vertexInput.createInfo;
-        pipelineInfo.pInputAssemblyState = &inputAssembly;
-        pipelineInfo.pViewportState = &viewportState.viewportState;
-        pipelineInfo.pRasterizationState = &raster;
-        pipelineInfo.pMultisampleState = &multisampling;
-        pipelineInfo.pDepthStencilState = &depthStencil;
-        pipelineInfo.pColorBlendState = &colorBlend;
-        pipelineInfo.pDynamicState = &viewportState.dynamicState;
-        pipelineInfo.layout = m_outlineMaskPipelineLayout;
-        pipelineInfo.renderPass = m_outlineMaskRenderPass;
-        pipelineInfo.subpass = 0;
-
-        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_outlineMaskPipeline) !=
-            VK_SUCCESS) {
+        m_outlineMaskPipeline = CreateMaskPipeline(stages.data(), m_outlineMaskPipelineLayout);
+        if (m_outlineMaskPipeline == VK_NULL_HANDLE) {
             INXLOG_ERROR("OutlineRenderer: Failed to create outline mask pipeline");
         }
     }
@@ -737,6 +713,39 @@ void OutlineRenderer::CreateOutlineMaterialResources()
     }
 }
 
+VkPipeline OutlineRenderer::CreateMaskPipeline(const VkPipelineShaderStageCreateInfo stages[2],
+                                               VkPipelineLayout layout)
+{
+    MeshVertexInputState vertexInput;
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly = MakeTriangleListInputAssembly();
+    DynamicViewportState viewportState;
+    VkPipelineRasterizationStateCreateInfo raster = MakeRasterizationState(VK_CULL_MODE_NONE);
+    VkPipelineDepthStencilStateCreateInfo depthStencil = MakeDepthStencilState(VK_FALSE, VK_FALSE);
+    VkPipelineMultisampleStateCreateInfo multisampling = MakeMultisampleState(VK_SAMPLE_COUNT_1_BIT);
+    VkPipelineColorBlendAttachmentState colorBlendAttach = MakeOpaqueColorBlendAttachment();
+    VkPipelineColorBlendStateCreateInfo colorBlend = MakeColorBlendState(colorBlendAttach);
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = stages;
+    pipelineInfo.pVertexInputState = &vertexInput.createInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState.viewportState;
+    pipelineInfo.pRasterizationState = &raster;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlend;
+    pipelineInfo.pDynamicState = &viewportState.dynamicState;
+    pipelineInfo.layout = layout;
+    pipelineInfo.renderPass = m_outlineMaskRenderPass;
+    pipelineInfo.subpass = 0;
+
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    vkCreateGraphicsPipelines(m_core->GetDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
+    return pipeline;
+}
+
 VkPipeline OutlineRenderer::GetOrCreateMtlOutlinePipeline(InxMaterial *material)
 {
     std::string key = material->GetMaterialKey();
@@ -762,33 +771,9 @@ VkPipeline OutlineRenderer::GetOrCreateMtlOutlinePipeline(InxMaterial *material)
         MakeShaderStageInfo(VK_SHADER_STAGE_VERTEX_BIT, vertModule),
         MakeShaderStageInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragModule),
     };
-    MeshVertexInputState vertexInput;
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly = MakeTriangleListInputAssembly();
-    DynamicViewportState viewportState;
-    VkPipelineRasterizationStateCreateInfo raster = MakeRasterizationState(VK_CULL_MODE_NONE);
-    VkPipelineDepthStencilStateCreateInfo depthStencil = MakeDepthStencilState(VK_FALSE, VK_FALSE);
-    VkPipelineMultisampleStateCreateInfo multisampling = MakeMultisampleState(VK_SAMPLE_COUNT_1_BIT);
-    VkPipelineColorBlendAttachmentState colorBlendAttach = MakeOpaqueColorBlendAttachment();
-    VkPipelineColorBlendStateCreateInfo colorBlend = MakeColorBlendState(colorBlendAttach);
 
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = static_cast<uint32_t>(stages.size());
-    pipelineInfo.pStages = stages.data();
-    pipelineInfo.pVertexInputState = &vertexInput.createInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState.viewportState;
-    pipelineInfo.pRasterizationState = &raster;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlend;
-    pipelineInfo.pDynamicState = &viewportState.dynamicState;
-    pipelineInfo.layout = m_outlineMtlPipelineLayout;
-    pipelineInfo.renderPass = m_outlineMaskRenderPass;
-    pipelineInfo.subpass = 0;
-
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
+    VkPipeline pipeline = CreateMaskPipeline(stages.data(), m_outlineMtlPipelineLayout);
+    if (pipeline == VK_NULL_HANDLE) {
         INXLOG_WARN("OutlineRenderer: Failed to create per-material outline pipeline for '", material->GetName(), "'");
         return VK_NULL_HANDLE;
     }

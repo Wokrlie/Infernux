@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <core/config/MathConstants.h>
 #include <function/resources/AssetRegistry/AssetRegistry.h>
 #include <function/resources/InxMaterial/InxMaterial.h>
 #include <function/scene/Camera.h>
@@ -728,7 +729,7 @@ void InxRenderer::DrawFrame()
         globals.zBufferParams = glm::vec4(1.0f - fn, fn, (1.0f - fn) / farClip, fn / farClip);
 
         // Frame
-        float dt = m_deltaTime > 1e-6f ? m_deltaTime : 1e-6f;
+        float dt = m_deltaTime > kEpsilon ? m_deltaTime : kEpsilon;
         globals.frameParams = glm::vec4(static_cast<float>(m_frameCount), m_smoothDeltaTime, 1.0f / dt, 0.0f);
 
         m_vkCore->StageGlobals(globals);

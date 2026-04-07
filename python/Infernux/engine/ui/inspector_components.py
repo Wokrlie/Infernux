@@ -1478,6 +1478,81 @@ def _render_asset_reference_field(ctx, comp, field_name, metadata, current_value
     )
 
 
+def _render_component_ref_inline(ctx, py_comp, field_name, metadata, lw):
+    """Render a FieldType.COMPONENT reference field (extracted from render_py_component)."""
+    from Infernux.components.ref_wrappers import ComponentRef
+    from Infernux.components.serialized_field import get_raw_field_value, FieldType
+    _comp_ref = get_raw_field_value(py_comp, field_name)
+    if not isinstance(_comp_ref, ComponentRef):
+        _comp_ref = ComponentRef()
+    _display = _comp_ref.display_name
+    _type_hint = metadata.component_type or "Component"
+    _ct = metadata.component_type
+
+    def _comp_scene(filt, _ct=_ct):
+        return _picker_scene_gameobjects(filt, required_component=_ct)
+
+    def _comp_on_pick(go, _fn=field_name, _comp=py_comp, _ct=_ct):
+        ref = _create_component_ref_from_go(go, _ct)
+        if ref is not None:
+            old = get_raw_field_value(_comp, _fn)
+            _record_property(_comp, _fn, old, ref, f"Set {_fn}")
+
+    def _comp_on_clear(_fn=field_name, _comp=py_comp):
+        old = get_raw_field_value(_comp, _fn)
+        _record_property(_comp, _fn, old, ComponentRef(), f"Clear {_fn}")
+
+    field_label(ctx, pretty_field_name(field_name), lw)
+    render_object_field(
+        ctx, f"comp_ref_{field_name}", _display, _type_hint,
+        accept_drag_type=["HIERARCHY_GAMEOBJECT", "PREFAB_GUID", "PREFAB_FILE"],
+        on_drop_callback=lambda payload, _fn=field_name, _comp=py_comp, _ct=metadata.component_type: _apply_reference_drop(FieldType.COMPONENT, _comp, _fn, payload, _ct),
+        picker_scene_items=_comp_scene,
+        on_pick=_comp_on_pick,
+        on_clear=_comp_on_clear,
+    )
+
+
+def _render_gameobject_ref_inline(ctx, py_comp, field_name, metadata, current_value, lw):
+    """Render a FieldType.GAME_OBJECT reference field (extracted from render_py_component)."""
+    from Infernux.components.ref_wrappers import PrefabRef, GameObjectRef
+    if isinstance(current_value, PrefabRef):
+        display = current_value.name
+        _type_hint_prefix = "Prefab"
+    else:
+        _display_obj = current_value
+        if hasattr(current_value, 'resolve'):
+            _display_obj = current_value.resolve()
+        display = _display_obj.name if _display_obj and hasattr(_display_obj, 'name') else "None"
+        _type_hint_prefix = "GameObject"
+    _type_hint = _type_hint_prefix
+    _req_comp = metadata.required_component
+    if _req_comp:
+        _type_hint = f"{_type_hint_prefix}:{_req_comp}"
+
+    def _go_scene(filt, _rc=_req_comp):
+        return _picker_scene_gameobjects(filt, required_component=_rc)
+
+    def _go_on_pick(go, _fn=field_name, _comp=py_comp):
+        ref = GameObjectRef(go)
+        old = getattr(_comp, _fn, None)
+        _record_property(_comp, _fn, old, ref, f"Set {_fn}")
+
+    def _go_on_clear(_fn=field_name, _comp=py_comp):
+        old = getattr(_comp, _fn, None)
+        _record_property(_comp, _fn, old, None, f"Clear {_fn}")
+
+    field_label(ctx, pretty_field_name(field_name), lw)
+    render_object_field(
+        ctx, f"go_ref_{field_name}", display, _type_hint,
+        accept_drag_type=["HIERARCHY_GAMEOBJECT", "PREFAB_GUID", "PREFAB_FILE"],
+        on_drop_callback=lambda payload, _fn=field_name, _comp=py_comp, _rc=_req_comp: _apply_gameobject_or_prefab_drop(_comp, _fn, payload, _rc),
+        picker_scene_items=_go_scene,
+        on_pick=_go_on_pick,
+        on_clear=_go_on_clear,
+    )
+
+
 def render_py_component(ctx: InxGUIContext, py_comp):
     """Render a Python InxComponent's serialized fields.
 
@@ -1616,79 +1691,13 @@ def render_py_component(ctx: InxGUIContext, py_comp):
 
         if metadata.field_type == FieldType.COMPONENT:
             _flush()
-            from Infernux.components.ref_wrappers import ComponentRef
-            from Infernux.components.serialized_field import get_raw_field_value
-            _comp_ref = get_raw_field_value(py_comp, field_name)
-            if not isinstance(_comp_ref, ComponentRef):
-                _comp_ref = ComponentRef()
-            _display = _comp_ref.display_name
-            _type_hint = metadata.component_type or "Component"
-            _ct = metadata.component_type
-
-            def _comp_scene(filt, _ct=_ct):
-                return _picker_scene_gameobjects(filt, required_component=_ct)
-
-            def _comp_on_pick(go, _fn=field_name, _comp=py_comp, _ct=_ct):
-                ref = _create_component_ref_from_go(go, _ct)
-                if ref is not None:
-                    old = get_raw_field_value(_comp, _fn)
-                    _record_property(_comp, _fn, old, ref, f"Set {_fn}")
-
-            def _comp_on_clear(_fn=field_name, _comp=py_comp):
-                old = get_raw_field_value(_comp, _fn)
-                _record_property(_comp, _fn, old, ComponentRef(), f"Clear {_fn}")
-
-            field_label(ctx, pretty_field_name(field_name), lw)
-            render_object_field(
-                ctx, f"comp_ref_{field_name}", _display, _type_hint,
-                accept_drag_type=["HIERARCHY_GAMEOBJECT", "PREFAB_GUID", "PREFAB_FILE"],
-                on_drop_callback=lambda payload, _fn=field_name, _comp=py_comp, _ct=metadata.component_type: _apply_reference_drop(FieldType.COMPONENT, _comp, _fn, payload, _ct),
-                picker_scene_items=_comp_scene,
-                on_pick=_comp_on_pick,
-                on_clear=_comp_on_clear,
-            )
+            _render_component_ref_inline(ctx, py_comp, field_name, metadata, lw)
             _tooltip_and_info(ctx, metadata)
             continue
 
         if metadata.field_type == FieldType.GAME_OBJECT:
             _flush()
-            from Infernux.components.ref_wrappers import PrefabRef
-            if isinstance(current_value, PrefabRef):
-                display = current_value.name
-                _type_hint_prefix = "Prefab"
-            else:
-                _display_obj = current_value
-                if hasattr(current_value, 'resolve'):
-                    _display_obj = current_value.resolve()
-                display = _display_obj.name if _display_obj and hasattr(_display_obj, 'name') else "None"
-                _type_hint_prefix = "GameObject"
-            _type_hint = _type_hint_prefix
-            _req_comp = metadata.required_component
-            if _req_comp:
-                _type_hint = f"{_type_hint_prefix}:{_req_comp}"
-
-            def _go_scene(filt, _rc=_req_comp):
-                return _picker_scene_gameobjects(filt, required_component=_rc)
-
-            def _go_on_pick(go, _fn=field_name, _comp=py_comp):
-                from Infernux.components.ref_wrappers import GameObjectRef
-                ref = GameObjectRef(go)
-                old = getattr(_comp, _fn, None)
-                _record_property(_comp, _fn, old, ref, f"Set {_fn}")
-
-            def _go_on_clear(_fn=field_name, _comp=py_comp):
-                old = getattr(_comp, _fn, None)
-                _record_property(_comp, _fn, old, None, f"Clear {_fn}")
-
-            field_label(ctx, pretty_field_name(field_name), lw)
-            render_object_field(
-                ctx, f"go_ref_{field_name}", display, _type_hint,
-                accept_drag_type=["HIERARCHY_GAMEOBJECT", "PREFAB_GUID", "PREFAB_FILE"],
-                on_drop_callback=lambda payload, _fn=field_name, _comp=py_comp, _rc=_req_comp: _apply_gameobject_or_prefab_drop(_comp, _fn, payload, _rc),
-                picker_scene_items=_go_scene,
-                on_pick=_go_on_pick,
-                on_clear=_go_on_clear,
-            )
+            _render_gameobject_ref_inline(ctx, py_comp, field_name, metadata, current_value, lw)
             _tooltip_and_info(ctx, metadata)
             continue
 

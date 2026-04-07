@@ -173,8 +173,8 @@ void Rigidbody::OnDisable()
         if (col)
             col->SetCachedRigidbody(nullptr);
 
-    auto &pw = PhysicsWorld::Instance();
-    if (!pw.IsInitialized())
+    auto *pw = &PhysicsWorld::Instance();
+    if (!pw->IsInitialized())
         return;
 
     // Rebuild shapes — MeshCollider may switch back to MeshShape now
@@ -182,13 +182,13 @@ void Rigidbody::OnDisable()
     // motionType to Static so the shape matches the new body type.
     for (auto *col : colliders) {
         if (col && col->IsEnabled() && col->GetBodyId() != 0xFFFFFFFF) {
-            pw.UpdateBodyShape(col);
+            pw->UpdateBodyShape(col);
             break; // shared body — one rebuild is enough
         }
     }
 
     for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        pw.SetBodyMotionType(bodyId, 0); // 0 = Static
+        pw->SetBodyMotionType(bodyId, 0); // 0 = Static
     }
 }
 
@@ -209,16 +209,13 @@ void Rigidbody::SetMass(float mass)
     auto &d = DataMut();
     d.mass = (mass < 0.001f) ? 0.001f : mass;
 
-    auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    if (!pw.IsInitialized())
+    GameObject *go = nullptr;
+    auto *pw = GetActivePhysicsWorld(go);
+    if (!pw)
         return;
 
     for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        pw.SetBodyMassProperties(bodyId, d.mass);
+        pw->SetBodyMassProperties(bodyId, d.mass);
     }
 }
 
@@ -241,17 +238,14 @@ void Rigidbody::SetUseGravity(bool use)
         return;
     d.useGravity = use;
 
-    auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    if (!pw.IsInitialized())
+    GameObject *go = nullptr;
+    auto *pw = GetActivePhysicsWorld(go);
+    if (!pw)
         return;
 
     float factor = d.useGravity ? 1.0f : 0.0f;
     for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        pw.SetBodyGravityFactor(bodyId, factor);
+        pw->SetBodyGravityFactor(bodyId, factor);
     }
 }
 
@@ -449,20 +443,17 @@ void Rigidbody::MovePosition(const glm::vec3 &position)
     if (!Data().isKinematic)
         return;
 
-    auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    if (!pw.IsInitialized())
+    GameObject *go = nullptr;
+    auto *pw = GetActivePhysicsWorld(go);
+    if (!pw)
         return;
 
     // Use current fixed timestep from SceneManager.
     float dt = SceneManager::Instance().GetFixedTimeStep();
 
     for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        glm::quat rot = pw.GetBodyRotation(bodyId);
-        pw.MoveBodyKinematic(bodyId, position, rot, dt);
+        glm::quat rot = pw->GetBodyRotation(bodyId);
+        pw->MoveBodyKinematic(bodyId, position, rot, dt);
     }
 
     // Also update Transform for consistency
@@ -475,12 +466,9 @@ void Rigidbody::MoveRotation(const glm::quat &rotation)
     if (!Data().isKinematic)
         return;
 
-    auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    if (!pw.IsInitialized())
+    GameObject *go = nullptr;
+    auto *pw = GetActivePhysicsWorld(go);
+    if (!pw)
         return;
 
     float dt = SceneManager::Instance().GetFixedTimeStep();
@@ -489,7 +477,7 @@ void Rigidbody::MoveRotation(const glm::quat &rotation)
     glm::vec3 pos = tf ? tf->GetPosition() : glm::vec3(0.0f);
 
     for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        pw.MoveBodyKinematic(bodyId, pos, rotation, dt);
+        pw->MoveBodyKinematic(bodyId, pos, rotation, dt);
     }
 
     if (tf)
@@ -805,14 +793,20 @@ bool Rigidbody::HasLinkedColliders() const
 // Internal helpers
 // ============================================================================
 
+PhysicsWorld *Rigidbody::GetActivePhysicsWorld(GameObject *&outGo) const
+{
+    outGo = GetGameObject();
+    if (!outGo)
+        return nullptr;
+    auto &pw = PhysicsWorld::Instance();
+    return pw.IsInitialized() ? &pw : nullptr;
+}
+
 void Rigidbody::NotifyCollidersBodyTypeChanged()
 {
-    auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    if (!pw.IsInitialized())
+    GameObject *go = nullptr;
+    auto *pw = GetActivePhysicsWorld(go);
+    if (!pw)
         return;
 
     const auto &d = Data();
@@ -824,7 +818,7 @@ void Rigidbody::NotifyCollidersBodyTypeChanged()
     auto colliders = go->GetComponents<Collider>();
     for (auto *col : colliders) {
         if (col && col->IsEnabled() && col->GetBodyId() != 0xFFFFFFFF) {
-            pw.UpdateBodyShape(col);
+            pw->UpdateBodyShape(col);
             break; // shared body — one rebuild is enough
         }
     }
@@ -833,12 +827,12 @@ void Rigidbody::NotifyCollidersBodyTypeChanged()
     int motionType = d.isKinematic ? 1 : 2;
 
     for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        pw.SetBodyMotionType(bodyId, motionType);
+        pw->SetBodyMotionType(bodyId, motionType);
 
         // Apply mass, drag, gravity settings
-        pw.SetBodyMassProperties(bodyId, d.mass);
-        pw.SetBodyDamping(bodyId, d.drag, d.angularDrag);
-        pw.SetBodyGravityFactor(bodyId, d.useGravity ? 1.0f : 0.0f);
+        pw->SetBodyMassProperties(bodyId, d.mass);
+        pw->SetBodyDamping(bodyId, d.drag, d.angularDrag);
+        pw->SetBodyGravityFactor(bodyId, d.useGravity ? 1.0f : 0.0f);
     }
 
     // Also apply the new extended settings
@@ -849,28 +843,22 @@ void Rigidbody::NotifyCollidersBodyTypeChanged()
 
 void Rigidbody::ApplyDragSettings()
 {
-    auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    if (!pw.IsInitialized())
+    GameObject *go = nullptr;
+    auto *pw = GetActivePhysicsWorld(go);
+    if (!pw)
         return;
 
     const auto &d = Data();
     for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        pw.SetBodyDamping(bodyId, d.drag, d.angularDrag);
+        pw->SetBodyDamping(bodyId, d.drag, d.angularDrag);
     }
 }
 
 void Rigidbody::ApplyConstraints()
 {
-    auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    if (!pw.IsInitialized())
+    GameObject *go = nullptr;
+    auto *pw = GetActivePhysicsWorld(go);
+    if (!pw)
         return;
 
     const auto &d = Data();
@@ -880,18 +868,15 @@ void Rigidbody::ApplyConstraints()
     int joltAllowed = 0x3F & ~(d.constraints >> 1);
 
     for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        pw.SetBodyAllowedDOFs(bodyId, joltAllowed, d.mass);
+        pw->SetBodyAllowedDOFs(bodyId, joltAllowed, d.mass);
     }
 }
 
 void Rigidbody::ApplyMotionQuality()
 {
-    auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    if (!pw.IsInitialized())
+    GameObject *go = nullptr;
+    auto *pw = GetActivePhysicsWorld(go);
+    if (!pw)
         return;
 
     const auto &d = Data();
@@ -903,24 +888,21 @@ void Rigidbody::ApplyMotionQuality()
     int joltQuality = MapCollisionDetectionModeToMotionQuality(d.collisionDetectionMode, d.isKinematic);
 
     for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        pw.SetBodyMotionQuality(bodyId, joltQuality);
+        pw->SetBodyMotionQuality(bodyId, joltQuality);
     }
 }
 
 void Rigidbody::ApplyVelocityLimits()
 {
-    auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    if (!pw.IsInitialized())
+    GameObject *go = nullptr;
+    auto *pw = GetActivePhysicsWorld(go);
+    if (!pw)
         return;
 
     const auto &d = Data();
     for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        pw.SetBodyMaxAngularVelocity(bodyId, d.maxAngularVelocity);
-        pw.SetBodyMaxLinearVelocity(bodyId, d.maxLinearVelocity);
+        pw->SetBodyMaxAngularVelocity(bodyId, d.maxAngularVelocity);
+        pw->SetBodyMaxLinearVelocity(bodyId, d.maxLinearVelocity);
     }
 }
 

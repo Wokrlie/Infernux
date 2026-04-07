@@ -159,6 +159,7 @@ class OutlineRenderer
     // ========================================================================
 
     void CreateOutlineMaterialResources();
+    VkPipeline CreateMaskPipeline(const VkPipelineShaderStageCreateInfo stages[2], VkPipelineLayout layout);
     VkPipeline GetOrCreateMtlOutlinePipeline(InxMaterial *material);
     VkDescriptorSet GetOrCreateMtlOutlineDescSet(InxMaterial *material);
 

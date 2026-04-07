@@ -85,9 +85,9 @@ VkFormat SceneRenderTarget::GetDepthFormat() const
 
 void SceneRenderTarget::CreateColorAttachment()
 {
-    auto imageInfo = vkrender::MakeImageCreateInfo2D(
-        m_width, m_height, VK_FORMAT_R16G16B16A16_SFLOAT,
-        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    auto imageInfo = vkrender::MakeImageCreateInfo2D(m_width, m_height, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                                         VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     VmaAllocator allocator = m_vkCore->GetDeviceContext().GetVmaAllocator();
     VmaAllocationCreateInfo allocCreateInfo{};
@@ -99,17 +99,17 @@ void SceneRenderTarget::CreateColorAttachment()
         throw std::runtime_error("Failed to create color image via VMA");
     }
 
-    auto viewInfo = vkrender::MakeImageViewCreateInfo2D(
-        m_colorImage, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT);
+    auto viewInfo =
+        vkrender::MakeImageViewCreateInfo2D(m_colorImage, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT);
     if (vkCreateImageView(m_vkCore->GetDevice(), &viewInfo, nullptr, &m_colorImageView) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create color image view");
     }
 
     // Transition to shader read optimal initially
     VkCommandBuffer cmdBuf = m_vkCore->BeginSingleTimeCommands();
-    auto barrier = vkrender::MakeImageBarrier(
-        m_colorImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_ACCESS_SHADER_READ_BIT);
+    auto barrier =
+        vkrender::MakeImageBarrier(m_colorImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                   VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_ACCESS_SHADER_READ_BIT);
     vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
                          nullptr, 0, nullptr, 1, &barrier);
     m_vkCore->EndSingleTimeCommands(cmdBuf);
@@ -135,8 +135,8 @@ void SceneRenderTarget::CreateMsaaColorAttachment()
         throw std::runtime_error("Failed to create MSAA color image via VMA");
     }
 
-    auto viewInfo = vkrender::MakeImageViewCreateInfo2D(
-        m_msaaColorImage, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT);
+    auto viewInfo =
+        vkrender::MakeImageViewCreateInfo2D(m_msaaColorImage, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT);
     if (vkCreateImageView(m_vkCore->GetDevice(), &viewInfo, nullptr, &m_msaaColorImageView) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create MSAA color image view");
     }
@@ -144,9 +144,9 @@ void SceneRenderTarget::CreateMsaaColorAttachment()
     // Keep the real image layout aligned with the render-graph's tracked initial
     // state for the imported MSAA backbuffer.
     VkCommandBuffer cmdBuf = m_vkCore->BeginSingleTimeCommands();
-    auto barrier = vkrender::MakeImageBarrier(
-        m_msaaColorImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+    auto barrier = vkrender::MakeImageBarrier(m_msaaColorImage, VK_IMAGE_LAYOUT_UNDEFINED,
+                                              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT, 0,
+                                              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
     vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0,
                          nullptr, 0, nullptr, 1, &barrier);
     m_vkCore->EndSingleTimeCommands(cmdBuf);
@@ -156,9 +156,8 @@ void SceneRenderTarget::CreateDepthAttachment()
 {
     VkFormat depthFormat = m_vkCore->GetDeviceContext().FindDepthFormat();
 
-    auto imageInfo = vkrender::MakeImageCreateInfo2D(
-        m_width, m_height, depthFormat,
-        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, m_msaaSampleCount);
+    auto imageInfo = vkrender::MakeImageCreateInfo2D(m_width, m_height, depthFormat,
+                                                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, m_msaaSampleCount);
 
     VmaAllocator allocator = m_vkCore->GetDeviceContext().GetVmaAllocator();
     VmaAllocationCreateInfo allocCreateInfo{};
@@ -170,8 +169,7 @@ void SceneRenderTarget::CreateDepthAttachment()
         throw std::runtime_error("Failed to create depth image via VMA");
     }
 
-    auto viewInfo = vkrender::MakeImageViewCreateInfo2D(
-        m_depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+    auto viewInfo = vkrender::MakeImageViewCreateInfo2D(m_depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
     if (vkCreateImageView(m_vkCore->GetDevice(), &viewInfo, nullptr, &m_depthImageView) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create depth image view");
     }
@@ -183,9 +181,9 @@ void SceneRenderTarget::CreateDepthAttachment()
     }
 
     VkCommandBuffer cmdBuf = m_vkCore->BeginSingleTimeCommands();
-    auto barrier = vkrender::MakeImageBarrier(
-        m_depthImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        depthAspect, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+    auto barrier = vkrender::MakeImageBarrier(m_depthImage, VK_IMAGE_LAYOUT_UNDEFINED,
+                                              VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, depthAspect, 0,
+                                              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
     vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, 0,
                          nullptr, 0, nullptr, 1, &barrier);
     m_vkCore->EndSingleTimeCommands(cmdBuf);
@@ -211,9 +209,8 @@ void SceneRenderTarget::CreateOutlineMaskAttachment()
 {
     VkDevice device = m_vkCore->GetDevice();
 
-    auto imageInfo = vkrender::MakeImageCreateInfo2D(
-        m_width, m_height, VK_FORMAT_R8G8B8A8_UNORM,
-        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    auto imageInfo = vkrender::MakeImageCreateInfo2D(m_width, m_height, VK_FORMAT_R8G8B8A8_UNORM,
+                                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
     VmaAllocator allocator = m_vkCore->GetDeviceContext().GetVmaAllocator();
     VmaAllocationCreateInfo allocCreateInfo{};
@@ -221,8 +218,8 @@ void SceneRenderTarget::CreateOutlineMaskAttachment()
 
     vmaCreateImage(allocator, &imageInfo, &allocCreateInfo, &m_outlineMaskImage, &m_outlineMaskAllocation, nullptr);
 
-    auto viewInfo = vkrender::MakeImageViewCreateInfo2D(
-        m_outlineMaskImage, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
+    auto viewInfo =
+        vkrender::MakeImageViewCreateInfo2D(m_outlineMaskImage, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
     vkCreateImageView(device, &viewInfo, nullptr, &m_outlineMaskImageView);
 
     // Sampler for composite pass
@@ -231,9 +228,9 @@ void SceneRenderTarget::CreateOutlineMaskAttachment()
 
     // Transition to shader-read initially (will be transitioned at runtime)
     VkCommandBuffer cmdBuf = m_vkCore->BeginSingleTimeCommands();
-    auto barrier = vkrender::MakeImageBarrier(
-        m_outlineMaskImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_ACCESS_SHADER_READ_BIT);
+    auto barrier = vkrender::MakeImageBarrier(m_outlineMaskImage, VK_IMAGE_LAYOUT_UNDEFINED,
+                                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT, 0,
+                                              VK_ACCESS_SHADER_READ_BIT);
     vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
                          nullptr, 0, nullptr, 1, &barrier);
     m_vkCore->EndSingleTimeCommands(cmdBuf);

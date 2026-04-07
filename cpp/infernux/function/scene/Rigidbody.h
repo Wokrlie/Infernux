@@ -309,6 +309,11 @@ class Rigidbody : public Component
     /// Apply velocity limits to all sibling Collider bodies.
     void ApplyVelocityLimits();
 
+    /// Returns the active PhysicsWorld if this Rigidbody's GameObject is valid
+    /// and physics is initialised; otherwise nullptr.  @p outGo receives the
+    /// GameObject pointer (may be nullptr on failure).
+    class PhysicsWorld *GetActivePhysicsWorld(GameObject *&outGo) const;
+
     /// Pool-backed data — read access
     [[nodiscard]] const RigidbodyECSData &Data() const
     {

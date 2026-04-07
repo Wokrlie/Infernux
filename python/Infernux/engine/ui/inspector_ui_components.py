@@ -866,6 +866,127 @@ def _render_button_inspector(ctx, btn_comp: UIButton):
     _render_on_click_events(ctx, btn_comp)
 
 
+def _render_onclick_argument_field(
+    ctx, btn_comp, entries, entry_idx, arg_index, spec, arg, lw,
+    clone_entries_fn, resolve_go_fn,
+):
+    """Render one On Click() event argument field.
+
+    Returns ``(updated_entries, updated_current_args | None, changed)``.
+    """
+    from Infernux.components.ref_wrappers import GameObjectRef, ComponentRef
+    from .inspector_components import render_object_field, _picker_scene_gameobjects, _create_component_ref_from_go
+
+    label = f"{spec.display_name}"
+    kind = spec.kind
+    i = entry_idx
+
+    if kind == "bool":
+        new_value = render_inspector_checkbox(ctx, label, bool(arg.bool_value))
+        if bool(new_value) != bool(arg.bool_value):
+            new_entries = clone_entries_fn(entries)
+            new_entries[i].arguments[arg_index].bool_value = bool(new_value)
+            _apply_if_changed(btn_comp, "on_click_entries", entries, new_entries)
+            return new_entries, list(new_entries[i].arguments or []), True
+    elif kind == "int":
+        field_label(ctx, label, lw)
+        new_value = int(ctx.drag_int(f"##onclick_arg_int_{i}_{arg_index}", int(arg.int_value), 1.0, -2147483647, 2147483647))
+        if new_value != int(arg.int_value):
+            new_entries = clone_entries_fn(entries)
+            new_entries[i].arguments[arg_index].int_value = int(new_value)
+            _apply_if_changed(btn_comp, "on_click_entries", entries, new_entries)
+            return new_entries, list(new_entries[i].arguments or []), True
+    elif kind == "float":
+        field_label(ctx, label, lw)
+        new_value = float(ctx.drag_float(f"##onclick_arg_float_{i}_{arg_index}", float(arg.float_value), 0.1, -1000000.0, 1000000.0))
+        if not math.isclose(new_value, float(arg.float_value), rel_tol=1e-5, abs_tol=1e-6):
+            new_entries = clone_entries_fn(entries)
+            new_entries[i].arguments[arg_index].float_value = float(new_value)
+            _apply_if_changed(btn_comp, "on_click_entries", entries, new_entries)
+            return new_entries, list(new_entries[i].arguments or []), True
+    elif kind == "game_object":
+        target_ref = _get_serializable_raw_field(arg, "game_object")
+        resolved_arg_go = target_ref.resolve() if hasattr(target_ref, "resolve") else None
+        display = resolved_arg_go.name if resolved_arg_go else t("igui.none")
+
+        def _make_arg_go_cbs(_entry_idx=i, _arg_idx=arg_index):
+            def _set(ref):
+                ne = clone_entries_fn(entries)
+                ne[_entry_idx].arguments[_arg_idx].game_object = ref
+                _apply_if_changed(btn_comp, "on_click_entries", entries, ne)
+
+            def _on_drop(payload):
+                go = resolve_go_fn(payload)
+                if go is not None:
+                    _set(GameObjectRef(go))
+
+            return (_on_drop,
+                    lambda go: _set(GameObjectRef(go)),
+                    lambda: _set(GameObjectRef(persistent_id=0)))
+
+        go_drop, go_pick, go_clear = _make_arg_go_cbs()
+
+        field_label(ctx, label, lw)
+        render_object_field(
+            ctx, f"onclick_arg_go_{i}_{arg_index}", display, "GameObject",
+            clickable=False,
+            accept_drag_type="HIERARCHY_GAMEOBJECT",
+            on_drop_callback=go_drop,
+            picker_scene_items=lambda filt: _picker_scene_gameobjects(filt),
+            on_pick=go_pick,
+            on_clear=go_clear,
+        )
+    elif kind == "component":
+        comp_ref = _get_serializable_raw_field(arg, "component")
+        display = comp_ref.display_name if isinstance(comp_ref, ComponentRef) else t("igui.none")
+        type_hint = spec.component_type or "Component"
+
+        def _make_arg_comp_cbs(_entry_idx=i, _arg_idx=arg_index, _comp_type=spec.component_type):
+            def _set(ref):
+                ne = clone_entries_fn(entries)
+                ne[_entry_idx].arguments[_arg_idx].component = ref
+                _apply_if_changed(btn_comp, "on_click_entries", entries, ne)
+
+            def _on_drop(payload):
+                go = resolve_go_fn(payload)
+                if go is None:
+                    return
+                ref = _create_component_ref_from_go(go, _comp_type)
+                if ref is not None:
+                    _set(ref)
+
+            def _on_pick(go):
+                ref = _create_component_ref_from_go(go, _comp_type)
+                if ref is not None:
+                    _set(ref)
+
+            return (_on_drop, _on_pick,
+                    lambda: _set(ComponentRef(component_type=_comp_type or "")))
+
+        comp_drop, comp_pick, comp_clear = _make_arg_comp_cbs()
+
+        field_label(ctx, label, lw)
+        render_object_field(
+            ctx, f"onclick_arg_comp_{i}_{arg_index}", display, type_hint,
+            clickable=False,
+            accept_drag_type="HIERARCHY_GAMEOBJECT",
+            on_drop_callback=comp_drop,
+            picker_scene_items=lambda filt, _ct=spec.component_type: _picker_scene_gameobjects(filt, required_component=_ct),
+            on_pick=comp_pick,
+            on_clear=comp_clear,
+        )
+    else:
+        field_label(ctx, label, lw)
+        new_value = ctx.text_input(f"##onclick_arg_str_{i}_{arg_index}", str(arg.string_value or ""), 1024)
+        if new_value != str(arg.string_value or ""):
+            new_entries = clone_entries_fn(entries)
+            new_entries[i].arguments[arg_index].string_value = new_value
+            _apply_if_changed(btn_comp, "on_click_entries", entries, new_entries)
+            return new_entries, list(new_entries[i].arguments or []), True
+
+    return entries, None, False
+
+
 def _render_on_click_events(ctx, btn_comp):
     """Render the Unity-style On Click () persistent event list."""
     IGUI = _igui()
@@ -1084,120 +1205,13 @@ def _render_on_click_events(ctx, btn_comp):
                         for arg_index, spec in enumerate(specs):
                             arg = current_args[arg_index]
                             ctx.push_id(arg_index)
-                            label = f"{spec.display_name}"
-                            kind = spec.kind
-
-                            if kind == "bool":
-                                new_value = render_inspector_checkbox(ctx, label, bool(arg.bool_value))
-                                if bool(new_value) != bool(arg.bool_value):
-                                    new_entries = _clone_entries(entries)
-                                    new_entries[i].arguments[arg_index].bool_value = bool(new_value)
-                                    _apply_if_changed(btn_comp, "on_click_entries", entries, new_entries)
-                                    entries = new_entries
-                                    current_args = list(new_entries[i].arguments or [])
-                                    changed = True
-                            elif kind == "int":
-                                field_label(ctx, label, lw)
-                                new_value = int(ctx.drag_int(f"##onclick_arg_int_{i}_{arg_index}", int(arg.int_value), 1.0, -2147483647, 2147483647))
-                                if new_value != int(arg.int_value):
-                                    new_entries = _clone_entries(entries)
-                                    new_entries[i].arguments[arg_index].int_value = int(new_value)
-                                    _apply_if_changed(btn_comp, "on_click_entries", entries, new_entries)
-                                    entries = new_entries
-                                    current_args = list(new_entries[i].arguments or [])
-                                    changed = True
-                            elif kind == "float":
-                                field_label(ctx, label, lw)
-                                new_value = float(ctx.drag_float(f"##onclick_arg_float_{i}_{arg_index}", float(arg.float_value), 0.1, -1000000.0, 1000000.0))
-                                if not math.isclose(new_value, float(arg.float_value), rel_tol=1e-5, abs_tol=1e-6):
-                                    new_entries = _clone_entries(entries)
-                                    new_entries[i].arguments[arg_index].float_value = float(new_value)
-                                    _apply_if_changed(btn_comp, "on_click_entries", entries, new_entries)
-                                    entries = new_entries
-                                    current_args = list(new_entries[i].arguments or [])
-                                    changed = True
-                            elif kind == "game_object":
-                                target_ref = _get_serializable_raw_field(arg, "game_object")
-                                resolved_arg_go = target_ref.resolve() if hasattr(target_ref, "resolve") else None
-                                display = resolved_arg_go.name if resolved_arg_go else t("igui.none")
-
-                                def _make_arg_go_cbs(_entry_idx=i, _arg_idx=arg_index):
-                                    def _set(ref):
-                                        ne = _clone_entries(entries)
-                                        ne[_entry_idx].arguments[_arg_idx].game_object = ref
-                                        _apply_if_changed(btn_comp, "on_click_entries", entries, ne)
-
-                                    def _on_drop(payload):
-                                        go = _resolve_go_from_payload(payload)
-                                        if go is not None:
-                                            _set(GameObjectRef(go))
-
-                                    return (_on_drop,
-                                            lambda go: _set(GameObjectRef(go)),
-                                            lambda: _set(GameObjectRef(persistent_id=0)))
-
-                                go_drop, go_pick, go_clear = _make_arg_go_cbs()
-
-                                field_label(ctx, label, lw)
-                                render_object_field(
-                                    ctx, f"onclick_arg_go_{i}_{arg_index}", display, "GameObject",
-                                    clickable=False,
-                                    accept_drag_type="HIERARCHY_GAMEOBJECT",
-                                    on_drop_callback=go_drop,
-                                    picker_scene_items=lambda filt: _picker_scene_gameobjects(filt),
-                                    on_pick=go_pick,
-                                    on_clear=go_clear,
-                                )
-                            elif kind == "component":
-                                comp_ref = _get_serializable_raw_field(arg, "component")
-                                display = comp_ref.display_name if isinstance(comp_ref, ComponentRef) else t("igui.none")
-                                type_hint = spec.component_type or "Component"
-
-                                def _make_arg_comp_cbs(_entry_idx=i, _arg_idx=arg_index, _comp_type=spec.component_type):
-                                    def _set(ref):
-                                        ne = _clone_entries(entries)
-                                        ne[_entry_idx].arguments[_arg_idx].component = ref
-                                        _apply_if_changed(btn_comp, "on_click_entries", entries, ne)
-
-                                    def _on_drop(payload):
-                                        go = _resolve_go_from_payload(payload)
-                                        if go is None:
-                                            return
-                                        ref = _create_component_ref_from_go(go, _comp_type)
-                                        if ref is not None:
-                                            _set(ref)
-
-                                    def _on_pick(go):
-                                        ref = _create_component_ref_from_go(go, _comp_type)
-                                        if ref is not None:
-                                            _set(ref)
-
-                                    return (_on_drop, _on_pick,
-                                            lambda: _set(ComponentRef(component_type=_comp_type or "")))
-
-                                comp_drop, comp_pick, comp_clear = _make_arg_comp_cbs()
-
-                                field_label(ctx, label, lw)
-                                render_object_field(
-                                    ctx, f"onclick_arg_comp_{i}_{arg_index}", display, type_hint,
-                                    clickable=False,
-                                    accept_drag_type="HIERARCHY_GAMEOBJECT",
-                                    on_drop_callback=comp_drop,
-                                    picker_scene_items=lambda filt, _ct=spec.component_type: _picker_scene_gameobjects(filt, required_component=_ct),
-                                    on_pick=comp_pick,
-                                    on_clear=comp_clear,
-                                )
-                            else:
-                                field_label(ctx, label, lw)
-                                new_value = ctx.text_input(f"##onclick_arg_str_{i}_{arg_index}", str(arg.string_value or ""), 1024)
-                                if new_value != str(arg.string_value or ""):
-                                    new_entries = _clone_entries(entries)
-                                    new_entries[i].arguments[arg_index].string_value = new_value
-                                    _apply_if_changed(btn_comp, "on_click_entries", entries, new_entries)
-                                    entries = new_entries
-                                    current_args = list(new_entries[i].arguments or [])
-                                    changed = True
-
+                            entries, _upd, _ch = _render_onclick_argument_field(
+                                ctx, btn_comp, entries, i, arg_index, spec, arg, lw,
+                                _clone_entries, _resolve_go_from_payload,
+                            )
+                            if _ch:
+                                current_args = _upd
+                                changed = True
                             ctx.pop_id()
                 elif cur_method:
                     field_label(ctx, t("ui_comp.arguments"), lw)

@@ -10,8 +10,8 @@ inline constexpr VkPipelineStageFlags kShaderUniformReadStages =
 
 // ── Image / View / Sampler creation helpers ─────────────────────────────
 
-inline VkImageCreateInfo MakeImageCreateInfo2D(uint32_t width, uint32_t height,
-                                               VkFormat format, VkImageUsageFlags usage,
+inline VkImageCreateInfo MakeImageCreateInfo2D(uint32_t width, uint32_t height, VkFormat format,
+                                               VkImageUsageFlags usage,
                                                VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT)
 {
     VkImageCreateInfo info{};
@@ -29,8 +29,7 @@ inline VkImageCreateInfo MakeImageCreateInfo2D(uint32_t width, uint32_t height,
     return info;
 }
 
-inline VkImageViewCreateInfo MakeImageViewCreateInfo2D(VkImage image, VkFormat format,
-                                                       VkImageAspectFlags aspectMask)
+inline VkImageViewCreateInfo MakeImageViewCreateInfo2D(VkImage image, VkFormat format, VkImageAspectFlags aspectMask)
 {
     VkImageViewCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -45,8 +44,7 @@ inline VkImageViewCreateInfo MakeImageViewCreateInfo2D(VkImage image, VkFormat f
     return info;
 }
 
-inline VkSamplerCreateInfo MakeLinearClampSamplerInfo(
-    VkBorderColor borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK)
+inline VkSamplerCreateInfo MakeLinearClampSamplerInfo(VkBorderColor borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK)
 {
     VkSamplerCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -68,10 +66,9 @@ inline VkSamplerCreateInfo MakeLinearClampSamplerInfo(
     return info;
 }
 
-inline VkImageMemoryBarrier MakeImageBarrier(VkImage image,
-                                             VkImageLayout oldLayout, VkImageLayout newLayout,
-                                             VkImageAspectFlags aspectMask,
-                                             VkAccessFlags srcAccess, VkAccessFlags dstAccess)
+inline VkImageMemoryBarrier MakeImageBarrier(VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
+                                             VkImageAspectFlags aspectMask, VkAccessFlags srcAccess,
+                                             VkAccessFlags dstAccess)
 {
     VkImageMemoryBarrier b{};
     b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -94,42 +91,66 @@ inline VkImageMemoryBarrier MakeImageBarrier(VkImage image,
 
 inline void SafeDestroy(VkDevice device, VkSampler &h)
 {
-    if (h != VK_NULL_HANDLE) { vkDestroySampler(device, h, nullptr); h = VK_NULL_HANDLE; }
+    if (h != VK_NULL_HANDLE) {
+        vkDestroySampler(device, h, nullptr);
+        h = VK_NULL_HANDLE;
+    }
 }
 
 inline void SafeDestroy(VkDevice device, VkImageView &h)
 {
-    if (h != VK_NULL_HANDLE) { vkDestroyImageView(device, h, nullptr); h = VK_NULL_HANDLE; }
+    if (h != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, h, nullptr);
+        h = VK_NULL_HANDLE;
+    }
 }
 
 inline void SafeDestroy(VkDevice device, VkPipeline &h)
 {
-    if (h != VK_NULL_HANDLE) { vkDestroyPipeline(device, h, nullptr); h = VK_NULL_HANDLE; }
+    if (h != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, h, nullptr);
+        h = VK_NULL_HANDLE;
+    }
 }
 
 inline void SafeDestroy(VkDevice device, VkPipelineLayout &h)
 {
-    if (h != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, h, nullptr); h = VK_NULL_HANDLE; }
+    if (h != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, h, nullptr);
+        h = VK_NULL_HANDLE;
+    }
 }
 
 inline void SafeDestroy(VkDevice device, VkDescriptorSetLayout &h)
 {
-    if (h != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, h, nullptr); h = VK_NULL_HANDLE; }
+    if (h != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, h, nullptr);
+        h = VK_NULL_HANDLE;
+    }
 }
 
 inline void SafeDestroy(VkDevice device, VkDescriptorPool &h)
 {
-    if (h != VK_NULL_HANDLE) { vkDestroyDescriptorPool(device, h, nullptr); h = VK_NULL_HANDLE; }
+    if (h != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(device, h, nullptr);
+        h = VK_NULL_HANDLE;
+    }
 }
 
 inline void SafeDestroy(VkDevice device, VkFramebuffer &h)
 {
-    if (h != VK_NULL_HANDLE) { vkDestroyFramebuffer(device, h, nullptr); h = VK_NULL_HANDLE; }
+    if (h != VK_NULL_HANDLE) {
+        vkDestroyFramebuffer(device, h, nullptr);
+        h = VK_NULL_HANDLE;
+    }
 }
 
 inline void SafeDestroy(VkDevice device, VkRenderPass &h)
 {
-    if (h != VK_NULL_HANDLE) { vkDestroyRenderPass(device, h, nullptr); h = VK_NULL_HANDLE; }
+    if (h != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(device, h, nullptr);
+        h = VK_NULL_HANDLE;
+    }
 }
 
 // ── Existing helpers ────────────────────────────────────────────────────

@@ -39,6 +39,7 @@
 #include "../Scene.h"
 #include "../Transform.h"
 #include <core/config/EngineConfig.h>
+#include <core/config/MathConstants.h>
 #include <core/log/InxLog.h>
 
 #include <algorithm>
@@ -1202,7 +1203,7 @@ bool PhysicsWorld::SphereCast(const glm::vec3 &origin, float radius, const glm::
     outHit.normal =
         glm::vec3(-result.mPenetrationAxis.GetX(), -result.mPenetrationAxis.GetY(), -result.mPenetrationAxis.GetZ());
     float nLen = glm::length(outHit.normal);
-    if (nLen > 1e-6f)
+    if (nLen > kEpsilon)
         outHit.normal /= nLen;
 
     outHit.collider = ResolveColliderForSubShape(bodyId, result.mSubShapeID2.GetValue());
@@ -1253,7 +1254,7 @@ bool PhysicsWorld::BoxCast(const glm::vec3 &center, const glm::vec3 &halfExtents
     outHit.normal =
         glm::vec3(-result.mPenetrationAxis.GetX(), -result.mPenetrationAxis.GetY(), -result.mPenetrationAxis.GetZ());
     float nLen = glm::length(outHit.normal);
-    if (nLen > 1e-6f)
+    if (nLen > kEpsilon)
         outHit.normal /= nLen;
 
     outHit.collider = ResolveColliderForSubShape(bodyId, result.mSubShapeID2.GetValue());

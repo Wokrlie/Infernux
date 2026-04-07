@@ -7,6 +7,20 @@
 namespace infernux
 {
 
+namespace
+{
+
+/// Clear all Forward-pass Vulkan handles on a material to prevent stale references.
+void ClearForwardPassHandles(InxMaterial *material)
+{
+    material->SetPassPipeline(ShaderCompileTarget::Forward, VK_NULL_HANDLE);
+    material->SetPassPipelineLayout(ShaderCompileTarget::Forward, VK_NULL_HANDLE);
+    material->SetPassDescriptorSet(ShaderCompileTarget::Forward, VK_NULL_HANDLE);
+    material->SetPassShaderProgram(ShaderCompileTarget::Forward, nullptr);
+}
+
+} // namespace
+
 MaterialPipelineManager::~MaterialPipelineManager()
 {
     Shutdown();
@@ -192,10 +206,7 @@ MaterialRenderData *MaterialPipelineManager::GetOrCreateRenderDataWithReflection
     if (it != m_renderDataMap.end()) {
         size_t currentHash = material->GetPipelineHash();
         // Fold MRT attachment count into hash so forward vs. deferred pipelines differ
-        {
-            size_t h = std::hash<uint32_t>{}(m_activeColorAttachmentCount);
-            currentHash ^= h + 0x9e3779b9 + (currentHash << 6) + (currentHash >> 2);
-        }
+        currentHash = FoldMRTAttachmentHash(currentHash);
 
         if (it->second->isValid) {
             if (it->second->pipelineHash == currentHash) {
@@ -216,10 +227,7 @@ MaterialRenderData *MaterialPipelineManager::GetOrCreateRenderDataWithReflection
             // If recreation fails below, the draw code will see pipeline == VK_NULL_HANDLE
             // and correctly fall back to the error material instead of rendering with
             // the old (now-incorrect) pipeline/descriptor set.
-            material->SetPassPipeline(ShaderCompileTarget::Forward, VK_NULL_HANDLE);
-            material->SetPassPipelineLayout(ShaderCompileTarget::Forward, VK_NULL_HANDLE);
-            material->SetPassDescriptorSet(ShaderCompileTarget::Forward, VK_NULL_HANDLE);
-            material->SetPassShaderProgram(ShaderCompileTarget::Forward, nullptr);
+            ClearForwardPassHandles(material.get());
             it->second->isValid = false;
             // Update stored hash so we know when the user changes config again
             it->second->pipelineHash = currentHash;
@@ -256,10 +264,7 @@ MaterialRenderData *MaterialPipelineManager::GetOrCreateRenderDataWithReflection
     renderData->material = material;
     renderData->pipelineHash = material->GetPipelineHash();
     // Fold MRT attachment count into hash (must match the logic in the early-return path above)
-    {
-        size_t h = std::hash<uint32_t>{}(m_activeColorAttachmentCount);
-        renderData->pipelineHash ^= h + 0x9e3779b9 + (renderData->pipelineHash << 6) + (renderData->pipelineHash >> 2);
-    }
+    renderData->pipelineHash = FoldMRTAttachmentHash(renderData->pipelineHash);
     renderData->shaderProgram = program;
     renderData->vertModule = program->GetVertexModule();
     renderData->fragModule = program->GetFragmentModule();
@@ -515,6 +520,12 @@ void MaterialPipelineManager::ResetMRTConfig()
     m_activeColorFormats.clear();
 }
 
+size_t MaterialPipelineManager::FoldMRTAttachmentHash(size_t baseHash) const
+{
+    size_t h = std::hash<uint32_t>{}(m_activeColorAttachmentCount);
+    return baseHash ^ (h + 0x9e3779b9 + (baseHash << 6) + (baseHash >> 2));
+}
+
 VkRenderPass MaterialPipelineManager::GetActiveMRTRenderPass()
 {
     if (m_activeColorAttachmentCount <= 1) {
@@ -758,9 +769,7 @@ void MaterialPipelineManager::RemoveRenderData(const std::string &materialName)
     if (data) {
         // Clear material's cached pipeline
         if (data->material) {
-            data->material->SetPassPipeline(ShaderCompileTarget::Forward, VK_NULL_HANDLE);
-            data->material->SetPassPipelineLayout(ShaderCompileTarget::Forward, VK_NULL_HANDLE);
-            data->material->SetPassDescriptorSet(ShaderCompileTarget::Forward, VK_NULL_HANDLE);
+            ClearForwardPassHandles(data->material.get());
 
             // Non-forward passes (shadow / gbuffer / etc.) are not stored in
             // m_pipelineCache. If this render-data entry is removed due to a

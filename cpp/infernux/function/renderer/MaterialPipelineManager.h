@@ -252,6 +252,11 @@ class MaterialPipelineManager
     VkPipeline CreatePipelineWithProgram(ShaderProgram *program, const RenderState &renderState);
 
     /**
+     * @brief Fold MRT attachment count into a pipeline hash so forward vs. deferred pipelines differ.
+     */
+    size_t FoldMRTAttachmentHash(size_t baseHash) const;
+
+    /**
      * @brief Create internal compatible render pass from stored formats
      */
     void CreateInternalRenderPass();

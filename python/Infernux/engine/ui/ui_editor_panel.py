@@ -1026,15 +1026,25 @@ class UIEditorPanel(EditorPanel):
             if dx != 0 or dy != 0:
                 self._nudge_selected(dx, dy, foc_ref_w, foc_ref_h)
 
-        # ══════════════════════════════════════════════════════════════
-        #  Click handling
-        # ══════════════════════════════════════════════════════════════
+        self._handle_canvas_click(
+            ctx, inp, all_canvases,
+            hovered_canvas_id, hovered_elem, hovered_all,
+            foc_origin_x, foc_origin_y,
+            area_min_x, area_min_y,
+        )
+
+    def _handle_canvas_click(
+        self, ctx, inp, all_canvases,
+        hovered_canvas_id, hovered_elem, hovered_all,
+        foc_origin_x, foc_origin_y,
+        area_min_x, area_min_y,
+    ):
+        """Dispatch canvas-area click: element cycling, canvas drag, resize/rotate/move."""
         _cycle_trigger = (
             (inp.lmb_double_clicked or (inp.ctrl_down and inp.lmb_clicked))
             and not inp.space_down and hovered_all and len(hovered_all) > 1
         )
         if _cycle_trigger:
-            # Focus the canvas containing the hovered element
             if hovered_canvas_id:
                 self._focused_canvas_id = hovered_canvas_id
             _CYCLE_TOL = 3.0 / self._zoom
@@ -1055,7 +1065,6 @@ class UIEditorPanel(EditorPanel):
             self._select_element(hovered_all[self._pick_cycle_index])
 
         elif inp.lmb_clicked and not inp.space_down:
-            # Check if clicking on canvas header (or empty-canvas body) → start canvas drag
             clicked_canvas_header = None
             if hovered_canvas_id and not hovered_elem:
                 for cgo, cv in all_canvases:
@@ -1077,20 +1086,20 @@ class UIEditorPanel(EditorPanel):
                         self._drag_canvas_start_wy = pp[1]
                     break
 
-            # Focus the hovered canvas
             if hovered_canvas_id:
                 self._focused_canvas_id = hovered_canvas_id
 
             if clicked_canvas_header is not None:
                 self._select_canvas(clicked_canvas_header)
             elif not self._dragging_canvas:
-                # Recalculate focused origin after possible focus change
                 foc_origin_x, foc_origin_y = self._get_focused_canvas_origin(
                     area_min_x, area_min_y, all_canvases)
                 _, focused_canvas = self._get_focused_canvas(all_canvases)
                 if focused_canvas is not None:
                     foc_ref_w = float(focused_canvas.reference_width)
                     foc_ref_h = float(focused_canvas.reference_height)
+                else:
+                    foc_ref_w = foc_ref_h = 1.0
 
                 clicked_kind, clicked_handle = self._hit_test_handle(inp.mouse_x, inp.mouse_y)
                 if clicked_kind in ("corner", "edge") and self._selected_element_comp is not None:
@@ -1137,7 +1146,6 @@ class UIEditorPanel(EditorPanel):
                     self._drag_elem_start_y = drag_y
                     self._undo_pre_drag = (float(hovered_elem.x), float(hovered_elem.y))
                 elif hovered_canvas_id:
-                    # Clicked on canvas body (no element) → select the canvas
                     for cgo, _cv in all_canvases:
                         if cgo.id == hovered_canvas_id:
                             self._select_canvas(cgo)
