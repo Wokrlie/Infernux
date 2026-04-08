@@ -110,6 +110,10 @@ class SerializedFieldDescriptor:
     
     Uses weak references to automatically clean up values when instances
     are garbage collected, preventing memory leaks.
+
+    Numeric fields (INT, FLOAT, BOOL, VEC2, VEC3, VEC4) are backed by the
+    C++ ComponentDataStore for cache-friendly batch access.  The CDS
+    identifiers are stamped on this descriptor by ``_cds_bridge.register_class``.
     """
     
     def __init__(self, metadata: FieldMetadata):
@@ -118,6 +122,10 @@ class SerializedFieldDescriptor:
         self._weak_refs: Dict[int, weakref.ref] = {}  # instance id -> weak ref
         self._lock = threading.Lock()  # Thread-safe access
         self._set_count: int = 0  # Counter for periodic dead-ref cleanup
+        # CDS backing (set by _cds_bridge.register_class; None = Python-only).
+        self._cds_class_id: Optional[int] = None
+        self._cds_field_id: Optional[int] = None
+        self._cds_type_code: Optional[int] = None
 
     def _make_ref_callback(self, inst_id: int):
         """Create a weak-ref callback that auto-cleans on GC."""
@@ -144,6 +152,11 @@ class SerializedFieldDescriptor:
     
     def get_raw(self, instance: 'InxComponent') -> Any:
         """Get the raw stored value without auto-resolution."""
+        if self._cds_class_id is not None:
+            slot = getattr(instance, '_cds_slot', None)
+            if slot is not None:
+                from ._cds_bridge import cds_get
+                return cds_get(self._cds_class_id, self._cds_field_id, self._cds_type_code, slot)
         inst_id = id(instance)
         with self._lock:
             return self._values.get(inst_id, self.metadata.default)
@@ -161,6 +174,12 @@ class SerializedFieldDescriptor:
     def __get__(self, instance: Optional['InxComponent'], owner: Type) -> Any:
         if instance is None:
             return self
+        # CDS fast path for numeric fields.
+        if self._cds_class_id is not None:
+            slot = getattr(instance, '_cds_slot', None)
+            if slot is not None:
+                from ._cds_bridge import cds_get
+                return cds_get(self._cds_class_id, self._cds_field_id, self._cds_type_code, slot)
         inst_id = id(instance)
         with self._lock:
             value = self._values.get(inst_id, self.metadata.default)
@@ -180,6 +199,25 @@ class SerializedFieldDescriptor:
             raise AttributeError(f"Field '{self.metadata.name}' is readonly")
 
         value = normalize_runtime_field_value(value, self.metadata)
+
+        # CDS fast path for numeric fields.
+        if self._cds_class_id is not None:
+            slot = getattr(instance, '_cds_slot', None)
+            if slot is not None:
+                # Undo hook (before write)
+                if not getattr(instance, '_inf_deserializing', False) and _on_field_will_change is not None:
+                    from ._cds_bridge import cds_get
+                    old_value = cds_get(self._cds_class_id, self._cds_field_id, self._cds_type_code, slot)
+                    if old_value != value:
+                        if _on_field_will_change(instance, self.metadata.name, old_value, value):
+                            return
+                from ._cds_bridge import cds_set, cds_get as _cg
+                old = _cg(self._cds_class_id, self._cds_field_id, self._cds_type_code, slot)
+                cds_set(self._cds_class_id, self._cds_field_id, self._cds_type_code, slot, value)
+                if not getattr(instance, '_inf_deserializing', False):
+                    if old != value and _on_field_did_change is not None:
+                        _on_field_did_change(instance, self.metadata.name, old, value)
+                return
 
         inst_id = id(instance)
 

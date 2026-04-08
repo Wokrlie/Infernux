@@ -214,6 +214,10 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
                 descriptor.__set_name__(cls, attr_name)
                 setattr(cls, attr_name, descriptor)
                 cls._serialized_fields_[attr_name] = meta
+
+        # ── Register numeric fields with C++ ComponentDataStore ──
+        from ._cds_bridge import register_class as _cds_register
+        _cds_register(cls)
     
     def __init__(self):
         """Internal framework initialization — **do not override**.
@@ -246,6 +250,10 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
         
         # Coroutine scheduler (lazy-created on first start_coroutine call)
         self._coroutine_scheduler = None
+
+        # Allocate a slot in the C++ ComponentDataStore for numeric fields.
+        from ._cds_bridge import allocate_slot as _cds_alloc
+        self._cds_slot: Optional[int] = _cds_alloc(self.__class__)
         
         # Initialize serialized fields with defaults (from class-level declarations)
         self._init_serialized_fields()
@@ -263,10 +271,17 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
                 default_value = metadata.default
 
             if isinstance(descriptor, SerializedFieldDescriptor):
-                inst_id = id(self)
-                with descriptor._lock:
-                    descriptor._values[inst_id] = default_value
-                    descriptor._weak_refs[inst_id] = weakref.ref(self, descriptor._make_ref_callback(inst_id))
+                # CDS-backed fields: write default to C++ store.
+                if descriptor._cds_class_id is not None and self._cds_slot is not None:
+                    from ._cds_bridge import cds_set
+                    cds_set(descriptor._cds_class_id, descriptor._cds_field_id,
+                            descriptor._cds_type_code, self._cds_slot, default_value)
+                else:
+                    # Non-CDS field: Python dict.
+                    inst_id = id(self)
+                    with descriptor._lock:
+                        descriptor._values[inst_id] = default_value
+                        descriptor._weak_refs[inst_id] = weakref.ref(self, descriptor._make_ref_callback(inst_id))
             elif hasattr(descriptor, '_is_cpp_property'):
                 # Skip ALL CppProperty descriptors — their values come from C++.
                 continue

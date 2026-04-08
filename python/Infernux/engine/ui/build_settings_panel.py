@@ -16,7 +16,6 @@ import os
 import json
 import sys
 import threading
-import ctypes
 from typing import Dict, List, Optional
 
 
@@ -34,6 +33,7 @@ from Infernux.engine.game_builder import (
 from Infernux.engine.nuitka_builder import _BuildCancelled as _NuitkaCancelled
 from Infernux.engine.i18n import t
 from .theme import Theme, ImGuiCol, ImGuiStyleVar
+from ._dialogs import pick_folder_dialog, pick_file_dialog, show_system_error_dialog
 
 
 # ---------------------------------------------------------------------------
@@ -79,233 +79,6 @@ def save_build_settings(settings: dict):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2, ensure_ascii=False)
-
-
-def _win32_pick_folder(title: str) -> Optional[str]:
-    import ctypes
-    import ctypes.wintypes as wt
-
-    COINIT_APARTMENTTHREADED = 0x2
-    BIF_RETURNONLYFSDIRS = 0x00000001
-    BIF_NEWDIALOGSTYLE = 0x00000040
-    MAX_PATH = 260
-
-    class BROWSEINFOW(ctypes.Structure):
-        _fields_ = [
-            ("hwndOwner", wt.HWND),
-            ("pidlRoot", ctypes.c_void_p),
-            ("pszDisplayName", wt.LPWSTR),
-            ("lpszTitle", wt.LPCWSTR),
-            ("ulFlags", wt.UINT),
-            ("lpfn", ctypes.c_void_p),
-            ("lParam", ctypes.c_void_p),
-            ("iImage", ctypes.c_int),
-        ]
-
-    display_name = ctypes.create_unicode_buffer(MAX_PATH)
-    browse = BROWSEINFOW()
-    browse.pszDisplayName = ctypes.cast(display_name, wt.LPWSTR)
-    browse.lpszTitle = title
-    browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE
-
-    shell32 = ctypes.windll.shell32
-    ole32 = ctypes.windll.ole32
-    user32 = ctypes.windll.user32
-    shell32.SHBrowseForFolderW.argtypes = [ctypes.POINTER(BROWSEINFOW)]
-    shell32.SHBrowseForFolderW.restype = ctypes.c_void_p
-    shell32.SHGetPathFromIDListW.argtypes = [ctypes.c_void_p, wt.LPWSTR]
-    shell32.SHGetPathFromIDListW.restype = wt.BOOL
-    ole32.CoInitializeEx.argtypes = [ctypes.c_void_p, wt.DWORD]
-    ole32.CoInitializeEx.restype = ctypes.HRESULT
-    ole32.CoUninitialize.argtypes = []
-    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
-    ole32.CoTaskMemFree.restype = None
-
-    browse.hwndOwner = user32.GetActiveWindow()
-
-    coinit_hr = ole32.CoInitializeEx(None, COINIT_APARTMENTTHREADED)
-    should_uninitialize = coinit_hr in (0, 1)
-    try:
-        pidl = shell32.SHBrowseForFolderW(ctypes.byref(browse))
-        if not pidl:
-            return None
-        path_buf = ctypes.create_unicode_buffer(MAX_PATH)
-        if shell32.SHGetPathFromIDListW(pidl, path_buf):
-            return path_buf.value
-        return None
-    finally:
-        if 'pidl' in locals() and pidl:
-            ole32.CoTaskMemFree(pidl)
-        if should_uninitialize:
-            ole32.CoUninitialize()
-
-
-def _win32_pick_file(title: str, filter_text: str) -> Optional[str]:
-    import ctypes
-    import ctypes.wintypes as wt
-
-    COINIT_APARTMENTTHREADED = 0x2
-    OFN_FILEMUSTEXIST = 0x00001000
-    OFN_PATHMUSTEXIST = 0x00000800
-    OFN_NOCHANGEDIR = 0x00000008
-    OFN_EXPLORER = 0x00080000
-    MAX_PATH = 4096
-
-    class OPENFILENAMEW(ctypes.Structure):
-        _fields_ = [
-            ("lStructSize", wt.DWORD),
-            ("hwndOwner", wt.HWND),
-            ("hInstance", wt.HINSTANCE),
-            ("lpstrFilter", wt.LPCWSTR),
-            ("lpstrCustomFilter", wt.LPWSTR),
-            ("nMaxCustFilter", wt.DWORD),
-            ("nFilterIndex", wt.DWORD),
-            ("lpstrFile", wt.LPWSTR),
-            ("nMaxFile", wt.DWORD),
-            ("lpstrFileTitle", wt.LPWSTR),
-            ("nMaxFileTitle", wt.DWORD),
-            ("lpstrInitialDir", wt.LPCWSTR),
-            ("lpstrTitle", wt.LPCWSTR),
-            ("Flags", wt.DWORD),
-            ("nFileOffset", wt.WORD),
-            ("nFileExtension", wt.WORD),
-            ("lpstrDefExt", wt.LPCWSTR),
-            ("lCustData", ctypes.c_void_p),
-            ("lpfnHook", ctypes.c_void_p),
-            ("lpTemplateName", wt.LPCWSTR),
-            ("pvReserved", ctypes.c_void_p),
-            ("dwReserved", wt.DWORD),
-            ("FlagsEx", wt.DWORD),
-        ]
-
-    buf = ctypes.create_unicode_buffer(MAX_PATH)
-    ofn = OPENFILENAMEW()
-    ofn.lStructSize = ctypes.sizeof(OPENFILENAMEW)
-    ofn.lpstrFilter = filter_text
-    ofn.lpstrFile = ctypes.cast(buf, wt.LPWSTR)
-    ofn.nMaxFile = MAX_PATH
-    ofn.lpstrTitle = title
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER
-    ofn.hwndOwner = ctypes.windll.user32.GetActiveWindow()
-
-    comdlg32 = ctypes.windll.comdlg32
-    ole32 = ctypes.windll.ole32
-    comdlg32.GetOpenFileNameW.argtypes = [ctypes.POINTER(OPENFILENAMEW)]
-    comdlg32.GetOpenFileNameW.restype = wt.BOOL
-    ole32.CoInitializeEx.argtypes = [ctypes.c_void_p, wt.DWORD]
-    ole32.CoInitializeEx.restype = ctypes.HRESULT
-    ole32.CoUninitialize.argtypes = []
-
-    coinit_hr = ole32.CoInitializeEx(None, COINIT_APARTMENTTHREADED)
-    should_uninitialize = coinit_hr in (0, 1)
-    try:
-        if comdlg32.GetOpenFileNameW(ctypes.byref(ofn)):
-            return buf.value
-        return None
-    finally:
-        if should_uninitialize:
-            ole32.CoUninitialize()
-
-
-def _pick_folder_dialog(title: str) -> Optional[str]:
-    if sys.platform == "win32":
-        try:
-            return _win32_pick_folder(title)
-        except Exception as exc:
-            Debug.log_warning(f"Win32 folder dialog failed: {exc}")
-            return None
-
-    import tkinter as tk
-    from tkinter import filedialog
-
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    try:
-        return filedialog.askdirectory(parent=root, title=title)
-    finally:
-        root.destroy()
-
-
-def _pick_file_dialog(title: str) -> Optional[str]:
-    if sys.platform == "win32":
-        try:
-            return _win32_pick_file(
-                title,
-                "Images (*.png;*.jpg;*.jpeg;*.bmp)\0*.png;*.jpg;*.jpeg;*.bmp\0"
-                "Videos (*.mp4;*.avi;*.mov;*.mkv;*.webm)\0*.mp4;*.avi;*.mov;*.mkv;*.webm\0"
-                "All Files (*.*)\0*.*\0\0",
-            )
-        except Exception as exc:
-            Debug.log_warning(f"Win32 open-file dialog failed: {exc}")
-            return None
-
-    import tkinter as tk
-    from tkinter import filedialog
-
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    try:
-        return filedialog.askopenfilename(
-            parent=root,
-            title=title,
-            filetypes=[
-                ("Images", "*.png *.jpg *.jpeg *.bmp"),
-                ("Videos", "*.mp4 *.avi *.mov *.mkv *.webm"),
-                ("All Files", "*.*"),
-            ],
-        )
-    finally:
-        root.destroy()
-
-
-def _pick_icon_file_dialog(title: str) -> Optional[str]:
-    if sys.platform == "win32":
-        try:
-            return _win32_pick_file(
-                title,
-                "Images (*.png;*.jpg;*.jpeg;*.ico)\0*.png;*.jpg;*.jpeg;*.ico\0"
-                "All Files (*.*)\0*.*\0\0",
-            )
-        except Exception as exc:
-            Debug.log_warning(f"Win32 icon picker failed: {exc}")
-            return None
-
-    import tkinter as tk
-    from tkinter import filedialog
-
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    try:
-        return filedialog.askopenfilename(
-            parent=root,
-            title=title,
-            filetypes=[
-                ("Images", "*.png *.jpg *.jpeg *.ico"),
-                ("All Files", "*.*"),
-            ],
-        )
-    finally:
-        root.destroy()
-
-
-def _show_system_error_dialog(title: str, message: str) -> None:
-    if sys.platform == "win32":
-        ctypes.windll.user32.MessageBoxW(0, message, title, 0x10 | 0x0)
-        return
-
-    import tkinter as tk
-    from tkinter import messagebox
-
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    try:
-        messagebox.showerror(title, message, parent=root)
-    finally:
-        root.destroy()
 
 
 # ---------------------------------------------------------------------------
@@ -539,7 +312,7 @@ class BuildSettingsPanel:
     def _browse_output_dir(self):
         def _do():
             try:
-                folder = _pick_folder_dialog("Choose Output Directory")
+                folder = pick_folder_dialog("Choose Output Directory")
                 if folder:
                     self._output_dir = folder
                     self._save()
@@ -550,7 +323,11 @@ class BuildSettingsPanel:
     def _browse_icon_path(self):
         def _do():
             try:
-                path = _pick_icon_file_dialog("Choose Build Icon")
+                path = pick_file_dialog(
+                    "Choose Build Icon",
+                    win32_filter="Images (*.png;*.jpg;*.jpeg;*.ico)\0*.png;*.jpg;*.jpeg;*.ico\0All Files (*.*)\0*.*\0\0",
+                    tk_filetypes=[("Images", "*.png *.jpg *.jpeg *.ico"), ("All Files", "*.*")],
+                )
                 if path:
                     ext = os.path.splitext(path)[1].lower()
                     if ext not in _ICON_EXTS:
@@ -700,7 +477,11 @@ class BuildSettingsPanel:
     def _browse_splash_file(self):
         def _do():
             try:
-                path = _pick_file_dialog("Add Splash Item")
+                path = pick_file_dialog(
+                    "Add Splash Item",
+                    win32_filter="Images (*.png;*.jpg;*.jpeg;*.bmp)\0*.png;*.jpg;*.jpeg;*.bmp\0Videos (*.mp4;*.avi;*.mov;*.mkv;*.webm)\0*.mp4;*.avi;*.mov;*.mkv;*.webm\0All Files (*.*)\0*.*\0\0",
+                    tk_filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp"), ("Videos", "*.mp4 *.avi *.mov *.mkv *.webm"), ("All Files", "*.*")],
+                )
                 if path:
                     ext = os.path.splitext(path)[1].lower()
                     itype = "video" if ext in _VIDEO_EXTS else "image"
@@ -933,7 +714,7 @@ class BuildSettingsPanel:
     def _show_output_directory_error(self, exc: BuildOutputDirectoryError) -> None:
         message = self._format_output_directory_error(exc)
         self._build_error = message
-        _show_system_error_dialog(t("build.output_directory_error_title"), message)
+        show_system_error_dialog(t("build.output_directory_error_title"), message)
 
     def _on_build_progress(self, message: str, fraction: float):
         self._build_message = message

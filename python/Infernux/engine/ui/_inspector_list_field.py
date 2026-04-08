@@ -1,0 +1,394 @@
+"""List field rendering helpers for the Inspector component renderers."""
+
+from dataclasses import replace
+from Infernux.components.component import InxComponent
+from Infernux.lib import InxGUIContext
+from .inspector_utils import (
+    max_label_w, render_serialized_field, has_field_changed,
+    render_compact_section_header, pretty_field_name,
+    get_enum_members as _get_enum_members,
+)
+from .theme import Theme
+from ._inspector_undo import _record_property
+from ._inspector_references import (
+    _create_reference_value_from_payload,
+    _get_reference_display_name,
+    _game_object_has_required_component,
+    _create_component_ref_from_go,
+    _picker_scene_gameobjects,
+    _picker_assets,
+    render_object_field,
+)
+
+
+def _make_list_default_element(metadata, element_type):
+    from Infernux.components.serialized_field import FieldType
+    from Infernux.math import Vector2, Vector3, vec4f
+
+    if element_type == FieldType.INT:
+        return 0
+    if element_type == FieldType.FLOAT:
+        return 0.0
+    if element_type == FieldType.BOOL:
+        return False
+    if element_type == FieldType.STRING:
+        return ""
+    if element_type == FieldType.VEC2:
+        return Vector2(0.0, 0.0)
+    if element_type == FieldType.VEC3:
+        return Vector3(0.0, 0.0, 0.0)
+    if element_type == FieldType.VEC4:
+        return vec4f(0.0, 0.0, 0.0, 0.0)
+    if element_type == FieldType.COLOR:
+        return [1.0, 1.0, 1.0, 1.0]
+    if element_type == FieldType.ENUM and metadata.enum_type is not None:
+        members = _get_enum_members(metadata.enum_type)
+        return members[0] if members else metadata.default
+    if element_type == FieldType.GAME_OBJECT:
+        from Infernux.components.ref_wrappers import GameObjectRef
+        return GameObjectRef(persistent_id=0)
+    if element_type == FieldType.MATERIAL:
+        from Infernux.components.ref_wrappers import MaterialRef
+        return MaterialRef(guid="")
+    if element_type == FieldType.TEXTURE:
+        from Infernux.core.asset_ref import TextureRef
+        return TextureRef()
+    if element_type == FieldType.SHADER:
+        from Infernux.core.asset_ref import ShaderRef
+        return ShaderRef()
+    if element_type == FieldType.ASSET:
+        from Infernux.core.asset_ref import AudioClipRef
+        return AudioClipRef()
+    if element_type == FieldType.SERIALIZABLE_OBJECT:
+        elem_cls = metadata.element_class
+        if elem_cls is not None:
+            return elem_cls()
+        return None
+    if element_type == FieldType.COMPONENT:
+        from Infernux.components.ref_wrappers import ComponentRef
+        comp_type = getattr(metadata, 'component_type', '') or ''
+        return ComponentRef(component_type=comp_type)
+    return None
+
+
+def _infer_list_element_type(metadata, current_value):
+    from Infernux.components.serialized_field import infer_field_type_from_value, FieldType
+
+    if metadata.element_type is not None:
+        return metadata.element_type
+
+    for container in (current_value, metadata.default):
+        if not isinstance(container, (list, tuple)):
+            continue
+        for item in container:
+            if item is None:
+                continue
+            inferred = infer_field_type_from_value(item)
+            if inferred != FieldType.UNKNOWN:
+                return inferred
+
+    return FieldType.STRING
+
+
+def _list_drag_drop_type(element_type):
+    from Infernux.components.serialized_field import FieldType
+
+    mapping = {
+        FieldType.GAME_OBJECT: ["HIERARCHY_GAMEOBJECT", "PREFAB_GUID", "PREFAB_FILE"],
+        FieldType.MATERIAL: "MATERIAL_FILE",
+        FieldType.TEXTURE: "TEXTURE_FILE",
+        FieldType.SHADER: "SHADER_FILE",
+        FieldType.ASSET: "AUDIO_FILE",
+        FieldType.COMPONENT: "HIERARCHY_GAMEOBJECT",
+    }
+    return mapping.get(element_type)
+
+
+def _list_type_hint(element_type, metadata):
+    from Infernux.components.serialized_field import FieldType
+
+    if element_type == FieldType.GAME_OBJECT:
+        return f"GameObject:{metadata.required_component}" if metadata.required_component else "GameObject"
+    if element_type == FieldType.MATERIAL:
+        return "Material"
+    if element_type == FieldType.TEXTURE:
+        return "Texture"
+    if element_type == FieldType.SHADER:
+        return "Shader"
+    if element_type == FieldType.ASSET:
+        return "AudioClip"
+    if element_type == FieldType.COMPONENT:
+        comp_type = getattr(metadata, 'component_type', '') or ''
+        return comp_type or "Component"
+    return "Element"
+
+
+def _make_list_picker_providers(element_type, metadata):
+    """Return ``(scene_items_fn_or_None, asset_items_fn_or_None)`` for a list element type."""
+    from Infernux.components.serialized_field import FieldType
+
+    if element_type in (FieldType.GAME_OBJECT, FieldType.COMPONENT):
+        _rc = metadata.component_type if element_type == FieldType.COMPONENT else metadata.required_component
+        return (lambda filt, _rc=_rc: _picker_scene_gameobjects(filt, required_component=_rc), None)
+
+    if element_type == FieldType.MATERIAL:
+        return (None, lambda filt: _picker_assets(filt, "*.mat"))
+    if element_type == FieldType.TEXTURE:
+        return (None, lambda filt: _picker_assets(filt, "*.png", assets_only=True) + _picker_assets(filt, "*.jpg", assets_only=True))
+    if element_type == FieldType.SHADER:
+        return (None, lambda filt: _picker_assets(filt, "*.vert") + _picker_assets(filt, "*.frag"))
+    if element_type == FieldType.ASSET:
+        return (None, lambda filt: _picker_assets(filt, "*.wav") + _picker_assets(filt, "*.mp3") + _picker_assets(filt, "*.ogg"))
+    return (None, None)
+
+
+def _create_list_pick_ref(element_type, value, required_component=None):
+    """Create a reference wrapper from a picker selection for a list element."""
+    from Infernux.components.serialized_field import FieldType
+
+    if element_type == FieldType.GAME_OBJECT:
+        from Infernux.components.ref_wrappers import GameObjectRef
+        return GameObjectRef(value) if value is not None else None
+
+    if element_type == FieldType.COMPONENT:
+        return _create_component_ref_from_go(value, required_component or '')
+
+    # Asset types: value is a file path
+    if element_type == FieldType.MATERIAL:
+        return _create_reference_value_from_payload(FieldType.MATERIAL, value)
+    if element_type == FieldType.TEXTURE:
+        return _create_reference_value_from_payload(FieldType.TEXTURE, value)
+    if element_type == FieldType.SHADER:
+        return _create_reference_value_from_payload(FieldType.SHADER, value)
+    if element_type == FieldType.ASSET:
+        return _create_reference_value_from_payload(FieldType.ASSET, value)
+    return None
+
+
+def _render_reference_list_item(ctx, field_name, index, item, items, metadata, element_type):
+    """Render a single reference-type list element (GameObject, Material, etc.).
+
+    Mutates *items* in-place on drop/pick/clear. Returns True if changed.
+    """
+    from Infernux.components.serialized_field import FieldType
+    from .igui import IGUI
+    changed = False
+    _req = metadata.component_type if element_type == FieldType.COMPONENT else metadata.required_component
+
+    def _replace_item(payload, _index=index, _req=_req):
+        nonlocal changed
+        value = _create_reference_value_from_payload(element_type, payload, _req)
+        if value is not None:
+            items[_index] = value
+            changed = True
+
+    _li_scene, _li_assets = _make_list_picker_providers(element_type, metadata)
+
+    def _li_on_pick(value, _index=index, _et=element_type, _req=_req):
+        nonlocal changed
+        ref = _create_list_pick_ref(_et, value, _req)
+        if ref is not None:
+            items[_index] = ref
+            changed = True
+
+    def _li_on_clear(_index=index, _et=element_type):
+        nonlocal changed
+        items[_index] = _make_list_default_element(metadata, _et)
+        changed = True
+
+    IGUI.object_field(
+        ctx,
+        f"list_{field_name}_{index}",
+        _get_reference_display_name(element_type, item),
+        _list_type_hint(element_type, metadata),
+        accept=_list_drag_drop_type(element_type),
+        on_drop=_replace_item,
+        picker_scene_items=_li_scene,
+        picker_asset_items=_li_assets,
+        on_pick=_li_on_pick,
+        on_clear=_li_on_clear,
+    )
+    return changed
+
+
+def _render_serializable_list_item(ctx, field_name, index, item, items, metadata):
+    """Render a single SERIALIZABLE_OBJECT list element with nested fields.
+
+    Mutates *items[index]* in-place on change. Returns True if changed.
+    """
+    import copy as _copy
+    so_class = type(item) if item is not None else metadata.element_class
+    so_label = f"[{index}]" + (f" ({so_class.__name__})" if so_class else "")
+    if not render_compact_section_header(ctx, so_label, level="tertiary"):
+        return False
+    from Infernux.components.serialized_field import get_serialized_fields as _gsf
+    if not so_class or item is None:
+        return False
+    so_fields = _gsf(so_class)
+    so_lw = max_label_w(ctx, list(so_fields.keys())) if so_fields else 0.0
+    elem_changes = {}
+    for so_fn, so_meta in so_fields.items():
+        so_val = getattr(item, so_fn, so_meta.default)
+        new_val = render_serialized_field(
+            ctx, f"##{field_name}_{index}_{so_fn}", so_fn,
+            so_meta, so_val, so_lw,
+        )
+        if has_field_changed(so_meta.field_type, so_val, new_val):
+            elem_changes[so_fn] = new_val
+    if not elem_changes:
+        return False
+    edited = _copy.deepcopy(item)
+    for fn, fv in elem_changes.items():
+        setattr(edited, fn, fv)
+    items[index] = edited
+    return True
+
+
+def _render_list_field(ctx: InxGUIContext, comp, field_name: str, metadata, current_value, lw: float):
+    from Infernux.components.serialized_field import FieldType
+    from .igui import IGUI
+
+    items = list(current_value) if isinstance(current_value, list) else []
+    element_type = _infer_list_element_type(metadata, items)
+    changed = False
+    button_spacing = Theme.INSPECTOR_INLINE_BTN_GAP
+
+    reference_types = {
+        FieldType.GAME_OBJECT,
+        FieldType.MATERIAL,
+        FieldType.TEXTURE,
+        FieldType.SHADER,
+        FieldType.ASSET,
+        FieldType.COMPONENT,
+    }
+
+    # ── Callbacks for IGUI.list_header ──
+    def _on_add():
+        nonlocal changed
+        items.append(_make_list_default_element(metadata, element_type))
+        changed = True
+
+    def _on_remove_last():
+        nonlocal changed
+        if items:
+            items.pop()
+            changed = True
+
+    # Header drop callback (for reference types)
+    _hdr_drag_type = _list_drag_drop_type(element_type) if element_type in reference_types else None
+    _hdr_req = (metadata.component_type if element_type == FieldType.COMPONENT
+                else metadata.required_component) if element_type in reference_types else None
+
+    def _header_drop(payload):
+        nonlocal changed
+        value = _create_reference_value_from_payload(element_type, payload, _hdr_req)
+        if value is not None:
+            items.append(value)
+            changed = True
+
+    # ── Unified list header: [label [N] ........... [-][+]] ──
+    header_open = IGUI.list_header(
+        ctx, pretty_field_name(field_name), len(items),
+        on_add=_on_add,
+        on_remove=_on_remove_last if items else None,
+        accept_drop=_hdr_drag_type,
+        on_header_drop=_header_drop if _hdr_drag_type else None,
+    )
+
+    if not header_open:
+        if changed and not metadata.readonly:
+            _record_property(comp, field_name, current_value, items, f"Set {field_name}")
+            if hasattr(comp, '_call_on_validate'):
+                comp._call_on_validate()
+        return
+
+    # ── Drag-reorder state ──
+    _list_drag_id = f"IGUI_LIST_{id(comp)}_{field_name}"
+    move_from = None
+    move_to = None
+
+    def _make_reorder_cb(target_index):
+        def _cb(payload):
+            nonlocal move_from, move_to
+            src = int(payload)
+            if src != target_index and src != target_index - 1:
+                move_from = src
+                move_to = target_index
+        return _cb
+
+    # Separator before first item
+    IGUI.reorder_separator(ctx, f"##sep_{field_name}_before_0", _list_drag_id, _make_reorder_cb(0))
+
+    remove_index = None
+    element_meta = replace(metadata, field_type=element_type, default=_make_list_default_element(metadata, element_type))
+
+    for index, item in enumerate(items):
+        ctx.push_id_str(f"{field_name}_{index}")
+
+        # [-] remove button per item
+        remove_clicked = IGUI.list_item_remove_button(ctx, f"{field_name}_{index}")
+        ctx.same_line(0, button_spacing)
+
+        # Drag source for reordering
+        if ctx.begin_drag_drop_source(0):
+            ctx.set_drag_drop_payload(_list_drag_id, index)
+            ctx.label(f"[{index}]")
+            ctx.end_drag_drop_source()
+
+        if element_type in reference_types:
+            if _render_reference_list_item(ctx, field_name, index, item, items, metadata, element_type):
+                changed = True
+        elif element_type == FieldType.SERIALIZABLE_OBJECT:
+            if _render_serializable_list_item(ctx, field_name, index, item, items, metadata):
+                changed = True
+        else:
+            new_item = render_serialized_field(
+                ctx, f"##{field_name}_{index}", "", element_meta, item, 0.0,
+            )
+            if has_field_changed(element_type, item, new_item):
+                items[index] = new_item
+                changed = True
+
+        if remove_clicked:
+            remove_index = index
+
+        ctx.pop_id()
+
+        # Separator after each item (reorder drop zone)
+        IGUI.reorder_separator(ctx, f"##sep_{field_name}_after_{index}", _list_drag_id, _make_reorder_cb(index + 1))
+
+    if remove_index is not None:
+        items.pop(remove_index)
+        changed = True
+
+    # Apply reorder
+    if move_from is not None and move_to is not None:
+        elem = items.pop(move_from)
+        insert_at = move_to if move_to < move_from else move_to - 1
+        items.insert(insert_at, elem)
+        changed = True
+
+    # Bottom drop zone for reference types
+    if element_type in reference_types:
+        _req = metadata.component_type if element_type == FieldType.COMPONENT else metadata.required_component
+        def _append_item(payload):
+            nonlocal changed
+            value = _create_reference_value_from_payload(element_type, payload, _req)
+            if value is not None:
+                items.append(value)
+                changed = True
+
+        IGUI.object_field(
+            ctx,
+            f"list_add_{field_name}",
+            "",
+            _list_type_hint(element_type, metadata),
+            clickable=False,
+            accept=_list_drag_drop_type(element_type),
+            on_drop=_append_item,
+        )
+
+    if changed and not metadata.readonly:
+        _record_property(comp, field_name, current_value, items, f"Set {field_name}")
+        if hasattr(comp, '_call_on_validate'):
+            comp._call_on_validate()

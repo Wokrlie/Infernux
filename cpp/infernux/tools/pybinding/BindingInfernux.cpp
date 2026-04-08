@@ -38,6 +38,7 @@ void RegisterTagLayerBindings(py::module_ &m);
 void RegisterInputBindings(py::module_ &m);
 void RegisterPhysicsBindings(py::module_ &m);
 void RegisterAudioBindings(py::module_ &m);
+void RegisterBatchBindings(py::module_ &m);
 } // namespace infernux
 
 PYBIND11_MODULE(_Infernux, m)
@@ -975,6 +976,7 @@ PYBIND11_MODULE(_Infernux, m)
     RegisterInputBindings(m);
     RegisterPhysicsBindings(m);
     RegisterAudioBindings(m);
+    RegisterBatchBindings(m);
 
     // ====================================================================
     // Gizmo geometry generation helpers (pure math, no engine state needed)

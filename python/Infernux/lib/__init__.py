@@ -222,6 +222,26 @@ except (ModuleNotFoundError, ImportError):
     except (ModuleNotFoundError, ImportError) as exc:
         _raise_native_import_error(exc)
 
+# `import *` skips underscore-prefixed names.  Re-export internal C++
+# helpers so that `from Infernux import lib; lib._cds_register_class`
+# works for the Python-side CDS bridge and batch API.
+try:
+    from ._Infernux import (
+        _cds_register_class,
+        _cds_register_field,
+        _cds_alloc,
+        _cds_free,
+        _cds_get,
+        _cds_set,
+        _cds_batch_gather,
+        _cds_batch_scatter,
+        _cds_clear,
+        _transform_batch_read,
+        _transform_batch_write,
+    )
+except ImportError:
+    pass  # graceful fallback if built without batch support
+
 
 _INVALID_NATIVE_LIFETIME_MARKERS = (
     "access violation",
