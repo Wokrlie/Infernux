@@ -26,6 +26,7 @@ class HierarchyPanel : public EditorPanel
 {
   public:
     HierarchyPanel();
+    std::unordered_map<std::string, double> ConsumeSubTimings() override;
 
     // ── Public API (called from Python bootstrap / other panels) ─────
 
@@ -91,6 +92,7 @@ class HierarchyPanel : public EditorPanel
     std::function<bool(uint64_t)> goHasUiScreenComponent;
     std::function<bool(uint64_t)> parentHasCanvasAncestor;
     std::function<bool(uint64_t)> hasCanvasDescendant;
+    std::function<std::vector<uint64_t>()> getCanvasRootIds;
 
     // ── Context-menu action callbacks ────────────────────────────────
 
@@ -183,6 +185,23 @@ class HierarchyPanel : public EditorPanel
     float m_cachedItemHeight = 18.0f;
     bool m_itemHeightMeasured = false;
 
+    // ── Flat virtual scrolling ───────────────────────────────────────
+    struct FlatItem
+    {
+        GameObject *obj;
+        int depth;
+        bool hasVisibleChildren;
+    };
+    std::vector<FlatItem> m_flatItems;
+    std::unordered_set<uint64_t> m_expandedNodes;
+    std::unordered_set<uint64_t> m_forceExpandIds; // one-shot SetNextItemOpen
+    bool m_flatListDirty = true; // rebuild flat list when true
+
+    void BuildFlatVisibleList(const std::vector<GameObject *> &roots);
+    void RebuildFlatListIfNeeded(const std::vector<GameObject *> &roots);
+    void BuildFlatListRecurse(GameObject *obj, int depth);
+    void RenderFlatItem(InxGUIContext *ctx, const FlatItem &item, float baseIndentX, float indentStep);
+
     // ── Pending selection (deferred left-click) ──────────────────────
     uint64_t m_pendingSelectId = 0;
     bool m_pendingCtrl = false;
@@ -199,6 +218,21 @@ class HierarchyPanel : public EditorPanel
 
     // ── Right-click tracking ─────────────────────────────────────────
     uint64_t m_rightClickedObjId = 0;
+
+    // ── Split sub-timings (accumulated ms, consumed by profile) ────
+    double m_subPreHidden = 0.0;
+    double m_subPreSelection = 0.0;
+    double m_subPreShortcuts = 0.0;
+    double m_subPrePendingSelect = 0.0;
+    double m_subHeader = 0.0;
+    double m_subSearch = 0.0;
+    double m_subRefreshRoots = 0.0;
+    double m_subCanvasRoots = 0.0;
+    double m_subFilterRoots = 0.0;
+    double m_subFlatBuild = 0.0;
+    double m_subRows = 0.0;
+    double m_subPopup = 0.0;
+    double m_subTailDrop = 0.0;
 
     // ── Helpers ──────────────────────────────────────────────────────
 
@@ -224,6 +258,7 @@ class HierarchyPanel : public EditorPanel
     // Tree rendering
     void RenderGameObjectTree(InxGUIContext *ctx, GameObject *obj);
     void RenderRenameInput(InxGUIContext *ctx, GameObject *obj);
+    void RenderItemContextMenu(InxGUIContext *ctx, GameObject *obj);
     void RenderReorderSep(InxGUIContext *ctx, const char *sepId, std::function<void(uint64_t)> onDrop);
     void RenderMultiDropTarget(InxGUIContext *ctx, uint64_t parentId);
 

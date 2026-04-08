@@ -890,6 +890,7 @@ void RegisterGUIBindings(py::module_ &m)
         .def_readwrite("go_has_ui_screen_component", &HierarchyPanel::goHasUiScreenComponent)
         .def_readwrite("parent_has_canvas_ancestor", &HierarchyPanel::parentHasCanvasAncestor)
         .def_readwrite("has_canvas_descendant", &HierarchyPanel::hasCanvasDescendant)
+        .def_readwrite("get_canvas_root_ids", &HierarchyPanel::getCanvasRootIds)
         // Context-menu action callbacks
         .def_readwrite("create_primitive", &HierarchyPanel::createPrimitive)
         .def_readwrite("create_light", &HierarchyPanel::createLight)
