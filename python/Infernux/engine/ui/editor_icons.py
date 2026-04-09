@@ -56,6 +56,11 @@ class EditorIcons:
         return _cache.get(name, 0)
 
     @staticmethod
+    def get_cached(name: str) -> int:
+        """Return a previously loaded icon id, or 0.  No engine required."""
+        return _cache.get(name, 0)
+
+    @staticmethod
     def reset():
         """Clear the cache (e.g. after engine re-init)."""
         global _loaded

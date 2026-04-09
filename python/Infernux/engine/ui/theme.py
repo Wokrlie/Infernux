@@ -370,9 +370,9 @@ class Theme:
 
     # -- Component Header
     INSPECTOR_HEADER_PRIMARY_FRAME_PAD = (4.0, 2.0)  # Primary header frame padding
-    INSPECTOR_HEADER_SECONDARY_FRAME_PAD = (4.0, 2.0)  # Secondary header frame padding
+    INSPECTOR_HEADER_SECONDARY_FRAME_PAD = (4.0, 1.0)  # Secondary header frame padding (compact)
     INSPECTOR_HEADER_PRIMARY_FONT_SCALE= 1.0  # Primary header font scale
-    INSPECTOR_HEADER_SECONDARY_FONT_SCALE= 1.0  # Secondary header font scale
+    INSPECTOR_HEADER_SECONDARY_FONT_SCALE= 0.92  # Secondary header font scale (smaller)
     INSPECTOR_HEADER_ITEM_SPC   = (4.0, 2.0)  # Header item spacing
     INSPECTOR_HEADER_BORDER_SIZE = 0.0  # Header border size
     INSPECTOR_ACTION_ALIGN_X    = 0.0  # Action button alignment
@@ -390,9 +390,9 @@ class Theme:
     INSPECTOR_HEADER_PRIMARY    : RGBA = (0.235, 0.235, 0.235, 1.0)  # Primary (Unity gray)
     INSPECTOR_HEADER_PRIMARY_HOVERED : RGBA = (0.28,  0.24,  0.24,  1.0)  # Primary hovered (red tint)
     INSPECTOR_HEADER_PRIMARY_ACTIVE  : RGBA = (0.32,  0.25,  0.25,  1.0)  # Primary active
-    INSPECTOR_HEADER_SECONDARY  : RGBA = (0.20,  0.20,  0.20,  1.0)  # Secondary
-    INSPECTOR_HEADER_SECONDARY_HOVERED : RGBA = (0.25,  0.22,  0.22,  1.0)
-    INSPECTOR_HEADER_SECONDARY_ACTIVE  : RGBA = (0.28,  0.24,  0.24,  1.0)
+    INSPECTOR_HEADER_SECONDARY  : RGBA = (0.17,  0.17,  0.17,  0.65)  # Secondary (subtle, semi-transparent)
+    INSPECTOR_HEADER_SECONDARY_HOVERED : RGBA = (0.22,  0.20,  0.20,  0.80)
+    INSPECTOR_HEADER_SECONDARY_ACTIVE  : RGBA = (0.26,  0.22,  0.22,  0.90)
 
     # -- Inspector Inline Buttons
     INSPECTOR_INLINE_BTN_IDLE  : RGBA = (0.20,  0.20,  0.20,  1.0)  # Idle

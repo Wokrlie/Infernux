@@ -34,6 +34,7 @@ from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
 from Infernux.lib import InxGUIContext
 from Infernux.engine.i18n import t
+from .editor_icons import EditorIcons
 from .theme import Theme, ImGuiCol, ImGuiStyleVar, ImGuiTreeNodeFlags
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -53,6 +54,7 @@ _LIST_REORDER_TYPE = "IGUI_LIST_REORDER"
 # Button sizes
 _INLINE_BTN_W: float = 24.0
 _PICKER_DOT_W: float = 20.0
+_LIST_ICON_BTN_SIZE: float = 20.0  # square icon buttons for list [+][-]
 
 # Picker popup filter state (keyed by field_id)
 _picker_filters: dict = {}
@@ -366,11 +368,12 @@ class IGUI:
             IGUI.drop_target(ctx, accept_drop, on_header_drop)
 
         # [−][+] buttons right-aligned on the same row
+        sz = _LIST_ICON_BTN_SIZE
         btns_w = 0.0
         if on_add:
-            btns_w += _INLINE_BTN_W
+            btns_w += sz
         if on_remove and count > 0:
-            btns_w += _INLINE_BTN_W
+            btns_w += sz
 
         if btns_w > 0:
             ctx.same_line(0, 0)
@@ -381,17 +384,23 @@ class IGUI:
             color_count = Theme.push_inline_button_style(ctx)
 
             if on_remove and count > 0:
-                if ctx.button(f"{Theme.ICON_MINUS}##{label}_remove", None,
-                              width=_INLINE_BTN_W,
-                              height=Theme.INSPECTOR_INLINE_BTN_H):
+                tid_minus = EditorIcons.get_cached(Theme.ICON_IMG_MINUS)
+                if tid_minus:
+                    if ctx.image_button(f"##{label}_remove", tid_minus, sz, sz):
+                        on_remove()
+                elif ctx.button(f"{Theme.ICON_MINUS}##{label}_remove", None,
+                                width=sz, height=sz):
                     on_remove()
 
             if on_add:
                 if on_remove and count > 0:
                     ctx.same_line(0, 0)
-                if ctx.button(f"{Theme.ICON_PLUS}##{label}_add", None,
-                              width=_INLINE_BTN_W,
-                              height=Theme.INSPECTOR_INLINE_BTN_H):
+                tid_plus = EditorIcons.get_cached(Theme.ICON_IMG_PLUS)
+                if tid_plus:
+                    if ctx.image_button(f"##{label}_add", tid_plus, sz, sz):
+                        on_add()
+                elif ctx.button(f"{Theme.ICON_PLUS}##{label}_add", None,
+                                width=sz, height=sz):
                     on_add()
 
             ctx.pop_style_color(color_count)
@@ -438,12 +447,16 @@ class IGUI:
         Returns True if clicked.  Caller should ``same_line`` after this
         before rendering the item widget.
         """
+        sz = _LIST_ICON_BTN_SIZE
         color_count = Theme.push_inline_button_style(ctx)
-        clicked = ctx.button(
-            f"{Theme.ICON_MINUS}##{item_id}_rm", None,
-            width=_INLINE_BTN_W,
-            height=Theme.INSPECTOR_INLINE_BTN_H,
-        )
+        tid_minus = EditorIcons.get_cached(Theme.ICON_IMG_MINUS)
+        if tid_minus:
+            clicked = ctx.image_button(f"##{item_id}_rm", tid_minus, sz, sz)
+        else:
+            clicked = ctx.button(
+                f"{Theme.ICON_MINUS}##{item_id}_rm", None,
+                width=sz, height=sz,
+            )
         ctx.pop_style_color(color_count)
         return clicked
 
