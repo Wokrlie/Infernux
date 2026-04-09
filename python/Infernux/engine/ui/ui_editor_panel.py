@@ -423,22 +423,8 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
 
     def _render_multi_canvas_area(self, ctx: InxGUIContext, all_canvases):
         """Main area: multi-canvas workspace with zoomable panels."""
+        self._validate_element_selection(all_canvases)
 
-        # Validate selection against all canvases
-        if self._selected_element_comp is not None:
-            try:
-                sel_go = self._selected_element_comp.game_object
-                if sel_go is None:
-                    self._clear_interaction_state()
-                else:
-                    found = any(self._is_descendant_of(sel_go.id, cgo)
-                                for cgo, _ in all_canvases)
-                    if not found:
-                        self._clear_interaction_state()
-            except Exception:
-                self._clear_interaction_state()
-
-        # Content region (below toolbar)
         region_w = ctx.get_content_region_avail_width()
         region_h = ctx.get_content_region_avail_height()
         if region_w < 1 or region_h < 1:
@@ -446,42 +432,97 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
 
         ctx.invisible_button("##ui_canvas_area", region_w, region_h)
         area_hovered = ctx.is_item_hovered()
-
         area_min_x = ctx.get_item_rect_min_x()
         area_min_y = ctx.get_item_rect_min_y()
         area_max_x = area_min_x + region_w
         area_max_y = area_min_y + region_h
 
-        # ── Input snapshot ──
         inp = UIEditorInput(ctx, area_hovered)
 
-        # ── Zoom (mouse wheel) ──
-        if abs(inp.wheel_delta) > 0.01:
-            old_zoom = self._zoom
-            self._zoom = max(Theme.UI_EDITOR_MIN_ZOOM,
-                             min(Theme.UI_EDITOR_MAX_ZOOM,
-                                 self._zoom * (1.0 + inp.wheel_delta * Theme.UI_EDITOR_ZOOM_STEP)))
-            factor = self._zoom / old_zoom
-            self._pan_x = inp.mouse_x - area_min_x - factor * (inp.mouse_x - area_min_x - self._pan_x)
-            self._pan_y = inp.mouse_y - area_min_y - factor * (inp.mouse_y - area_min_y - self._pan_y)
+        self._process_zoom_input(inp, area_min_x, area_min_y)
+        self._process_canvas_drag_input(inp, all_canvases)
+        self._process_workspace_pan(ctx, inp)
+
+        focused_go, focused_canvas = self._get_focused_canvas(all_canvases)
+        foc_origin_x, foc_origin_y = self._get_focused_canvas_origin(
+            area_min_x, area_min_y, all_canvases)
+        clear_rect_cache(_pc())
+
+        if focused_canvas is not None:
+            foc_ref_w = float(focused_canvas.reference_width)
+            foc_ref_h = float(focused_canvas.reference_height)
+        else:
+            foc_ref_w = foc_ref_h = 1.0
+
+        self._process_ongoing_interactions(inp, foc_ref_w, foc_ref_h, focused_canvas)
+
+        area = (area_min_x, area_min_y, area_max_x, area_max_y)
+        ctx.push_draw_list_clip_rect(*area, True)
+        hovered_canvas_id, hovered_elem, hovered_all = self._draw_canvases_and_hittest(
+            ctx, all_canvases, inp, area)
+        self._draw_selection_overlay(
+            ctx, focused_canvas, foc_origin_x, foc_origin_y,
+            foc_ref_w, foc_ref_h, area)
+        ctx.pop_draw_list_clip_rect()
+
+        self._update_hover_cursor(ctx, area_hovered, inp.mouse_x, inp.mouse_y)
+        self._process_keyboard_input(ctx, inp, focused_canvas, foc_ref_w, foc_ref_h)
+        self._handle_canvas_click(
+            ctx, inp, all_canvases,
+            hovered_canvas_id, hovered_elem, hovered_all,
+            foc_origin_x, foc_origin_y,
+            area_min_x, area_min_y,
+        )
+
+    # ------------------------------------------------------------------
+    # Extracted helpers for _render_multi_canvas_area
+    # ------------------------------------------------------------------
+
+    def _validate_element_selection(self, all_canvases):
+        """Clear selection if the selected element is no longer in any canvas."""
+        if self._selected_element_comp is None:
+            return
+        try:
+            sel_go = self._selected_element_comp.game_object
+            if sel_go is None:
+                self._clear_interaction_state()
+            elif not any(self._is_descendant_of(sel_go.id, cgo) for cgo, _ in all_canvases):
+                self._clear_interaction_state()
+        except Exception:
+            self._clear_interaction_state()
+
+    def _process_zoom_input(self, inp, area_min_x, area_min_y):
+        """Apply mouse-wheel zoom."""
+        if abs(inp.wheel_delta) <= 0.01:
+            return
+        old_zoom = self._zoom
+        self._zoom = max(Theme.UI_EDITOR_MIN_ZOOM,
+                         min(Theme.UI_EDITOR_MAX_ZOOM,
+                             self._zoom * (1.0 + inp.wheel_delta * Theme.UI_EDITOR_ZOOM_STEP)))
+        factor = self._zoom / old_zoom
+        self._pan_x = inp.mouse_x - area_min_x - factor * (inp.mouse_x - area_min_x - self._pan_x)
+        self._pan_y = inp.mouse_y - area_min_y - factor * (inp.mouse_y - area_min_y - self._pan_y)
+        self._save_view_settings()
+
+    def _process_canvas_drag_input(self, inp, all_canvases):
+        """Continue or finish dragging a canvas panel around the workspace."""
+        if not self._dragging_canvas:
+            return
+        if inp.lmb_down:
+            dx = (inp.mouse_x - self._drag_canvas_start_mx) / self._zoom
+            dy = (inp.mouse_y - self._drag_canvas_start_my) / self._zoom
+            new_wx = self._drag_canvas_start_wx + dx
+            new_wy = self._drag_canvas_start_wy + dy
+            new_wx, new_wy = self._clamp_canvas_no_overlap(
+                self._drag_canvas_id, new_wx, new_wy, all_canvases)
+            self._canvas_panel_positions[self._drag_canvas_id] = [new_wx, new_wy]
+        else:
+            self._dragging_canvas = False
+            self._drag_canvas_id = 0
             self._save_view_settings()
 
-        # ── Canvas panel drag ──
-        if self._dragging_canvas:
-            if inp.lmb_down:
-                dx = (inp.mouse_x - self._drag_canvas_start_mx) / self._zoom
-                dy = (inp.mouse_y - self._drag_canvas_start_my) / self._zoom
-                new_wx = self._drag_canvas_start_wx + dx
-                new_wy = self._drag_canvas_start_wy + dy
-                new_wx, new_wy = self._clamp_canvas_no_overlap(
-                    self._drag_canvas_id, new_wx, new_wy, all_canvases)
-                self._canvas_panel_positions[self._drag_canvas_id] = [new_wx, new_wy]
-            else:
-                self._dragging_canvas = False
-                self._drag_canvas_id = 0
-                self._save_view_settings()
-
-        # ── Workspace pan (Space+LMB or MMB) ──
+    def _process_workspace_pan(self, ctx, inp):
+        """Handle workspace panning via Space+LMB or MMB."""
         if inp.wants_pan and not self._dragging_canvas:
             if not self._is_panning:
                 self._is_panning = True
@@ -495,20 +536,8 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
         else:
             self._is_panning = False
 
-        # ── Focused canvas for element interactions ──
-        focused_go, focused_canvas = self._get_focused_canvas(all_canvases)
-        foc_origin_x, foc_origin_y = self._get_focused_canvas_origin(
-            area_min_x, area_min_y, all_canvases)
-
-        clear_rect_cache(_pc())
-
-        # ── Process ongoing element interactions BEFORE drawing (zero-lag) ──
-        if focused_canvas is not None:
-            foc_ref_w = float(focused_canvas.reference_width)
-            foc_ref_h = float(focused_canvas.reference_height)
-        else:
-            foc_ref_w = foc_ref_h = 1.0
-
+    def _process_ongoing_interactions(self, inp, foc_ref_w, foc_ref_h, focused_canvas):
+        """Continue in-progress resize / rotate / drag each frame."""
         if self._resizing:
             if inp.lmb_down:
                 self._apply_resize_suppressed(inp)
@@ -549,20 +578,21 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
         elif not self._resizing and not self._rotating:
             self._active_alignment_guides = []
 
-        # ══════════════════════════════════════════════════════════════
-        #  Draw all canvases
-        # ══════════════════════════════════════════════════════════════
+    def _draw_canvases_and_hittest(self, ctx, all_canvases, inp, area):
+        """Draw all canvas panels and hit-test for hovered elements.
+
+        Returns ``(hovered_canvas_id, hovered_elem, hovered_all)``.
+        """
         from Infernux.ui import UIText
         _tex_cache = _get_tex_cache()
         _get_tid = lambda tp: _tex_cache.get(self._engine, tp)
 
-        ctx.push_draw_list_clip_rect(area_min_x, area_min_y, area_max_x, area_max_y, True)
-
+        area_min_x, area_min_y, area_max_x, area_max_y = area
         hovered_canvas_id = 0
         hovered_elem = None
         hovered_all: list = []
         HEADER_H = Theme.UI_EDITOR_CANVAS_HEADER_H
-        _PICK_TOL = 3.0 / self._zoom  # 3 screen-px tolerance in canvas space
+        _PICK_TOL = 3.0 / self._zoom
 
         for canvas_go, canvas in all_canvases:
             go_id = canvas_go.id
@@ -573,167 +603,195 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
             ref_w = float(canvas.reference_width)
             ref_h = float(canvas.reference_height)
 
-            # Active / enabled state
             go_active = canvas_go.active_in_hierarchy
             canvas_enabled = getattr(canvas, 'enabled', True)
             is_active = go_active and canvas_enabled
             alpha_mult = 1.0 if is_active else Theme.UI_EDITOR_CANVAS_INACTIVE_ALPHA
-
-            # Canvas rect in screen space
-            c_tl_x, c_tl_y = self._canvas_to_screen(0, 0, origin_x, origin_y)
-            c_br_x, c_br_y = self._canvas_to_screen(ref_w, ref_h, origin_x, origin_y)
-            c_tl_x = round(c_tl_x)
-            c_tl_y = round(c_tl_y)
-            c_br_x = round(c_br_x)
-            c_br_y = round(c_br_y)
-
-            # Header rect (above canvas)
-            h_tl_y = c_tl_y - HEADER_H
-
-            # Visible clamped rects
-            v_tl_x = max(c_tl_x, area_min_x)
-            v_tl_y = max(c_tl_y, area_min_y)
-            v_br_x = min(c_br_x, area_max_x)
-            v_br_y = min(c_br_y, area_max_y)
-            canvas_visible = (v_br_x > v_tl_x and v_br_y > v_tl_y)
-
-            v_h_tl_x = max(c_tl_x, area_min_x)
-            v_h_tl_y = max(h_tl_y, area_min_y)
-            v_h_br_x = min(c_br_x, area_max_x)
-            v_h_br_y = min(c_tl_y, area_max_y)
-            header_visible = (v_h_br_x > v_h_tl_x and v_h_br_y > v_h_tl_y)
-
-            # ── Draw header ──
             is_focused = (go_id == self._focused_canvas_id)
-            if header_visible:
-                hdr_bg = Theme.UI_EDITOR_CANVAS_HEADER_BG_FOC if is_focused else Theme.UI_EDITOR_CANVAS_HEADER_BG
-                ctx.draw_filled_rect(v_h_tl_x, v_h_tl_y, v_h_br_x, v_h_br_y,
-                                     hdr_bg[0], hdr_bg[1], hdr_bg[2],
-                                     hdr_bg[3] * alpha_mult, 0.0)
-                label = f"{canvas_go.name}  {int(ref_w)}\u00d7{int(ref_h)}"
-                if not is_active:
-                    label += "  (inactive)"
-                tc = Theme.UI_EDITOR_CANVAS_HEADER_TEXT
-                ctx.draw_text(c_tl_x + 6, h_tl_y + 3, label,
-                              tc[0], tc[1], tc[2], tc[3] * alpha_mult, 0.0)
 
-            # ── Draw canvas background ──
-            if canvas_visible:
-                bg = Theme.UI_EDITOR_CANVAS_BG
-                ctx.draw_filled_rect(v_tl_x, v_tl_y, v_br_x, v_br_y,
-                                     bg[0], bg[1], bg[2], bg[3] * alpha_mult, 0.0)
+            canvas_bounds = self._compute_canvas_screen_bounds(
+                origin_x, origin_y, ref_w, ref_h, HEADER_H, area)
 
-            # ── Hit-test: is mouse over this canvas? ──
-            if area_hovered and not self._dragging_canvas:
-                if (c_tl_x <= inp.mouse_x <= c_br_x
-                        and h_tl_y <= inp.mouse_y <= c_br_y):
-                    hovered_canvas_id = go_id
-                    # Only pick elements on the focused canvas (or any if none focused)
-                    if (is_active and c_tl_y <= inp.mouse_y <= c_br_y
-                            and (is_focused or not self._focused_canvas_id)):
-                        cmx, cmy = self._screen_to_canvas(
-                            inp.mouse_x, inp.mouse_y, origin_x, origin_y)
-                        if 0.0 <= cmx <= ref_w and 0.0 <= cmy <= ref_h:
-                            _all = canvas.raycast_all(cmx, cmy, _PICK_TOL)
-                            if _all:
-                                hovered_all = _all
-                                hovered_elem = _all[0]
-                # Focused canvas: also pick elements outside canvas bounds
-                if is_focused and is_active and not hovered_elem:
-                    cmx, cmy = self._screen_to_canvas(
-                        inp.mouse_x, inp.mouse_y, origin_x, origin_y)
-                    _all = canvas.raycast_all(cmx, cmy, _PICK_TOL)
+            self._draw_canvas_chrome(ctx, canvas_go, ref_w, ref_h,
+                                     is_active, is_focused, alpha_mult, canvas_bounds)
+
+            hovered_canvas_id, hovered_elem, hovered_all = self._hittest_canvas_hover(
+                inp, canvas, canvas_go, is_active, is_focused, origin_x, origin_y,
+                ref_w, ref_h, _PICK_TOL, canvas_bounds,
+                hovered_canvas_id, hovered_elem, hovered_all)
+
+            if is_active:
+                self._draw_canvas_elements(
+                    ctx, canvas, origin_x, origin_y, ref_w, ref_h,
+                    area, hovered_elem, _get_tid, UIText)
+
+        # Fallback: pick elements on focused canvas outside canvas bounds
+        if not hovered_elem and self._focused_canvas_id and inp.area_hovered and not self._dragging_canvas:
+            hovered_canvas_id, hovered_elem, hovered_all = self._fallback_focused_pick(
+                inp, all_canvases, area_min_x, area_min_y, _PICK_TOL,
+                hovered_canvas_id, hovered_elem, hovered_all)
+
+        return hovered_canvas_id, hovered_elem, hovered_all
+
+    def _compute_canvas_screen_bounds(self, origin_x, origin_y, ref_w, ref_h, header_h, area):
+        """Compute screen-space bounds for a canvas panel and its header."""
+        area_min_x, area_min_y, area_max_x, area_max_y = area
+        c_tl_x, c_tl_y = self._canvas_to_screen(0, 0, origin_x, origin_y)
+        c_br_x, c_br_y = self._canvas_to_screen(ref_w, ref_h, origin_x, origin_y)
+        c_tl_x = round(c_tl_x); c_tl_y = round(c_tl_y)
+        c_br_x = round(c_br_x); c_br_y = round(c_br_y)
+        h_tl_y = c_tl_y - header_h
+        return (c_tl_x, c_tl_y, c_br_x, c_br_y, h_tl_y,
+                max(c_tl_x, area_min_x), max(c_tl_y, area_min_y),
+                min(c_br_x, area_max_x), min(c_br_y, area_max_y),
+                max(c_tl_x, area_min_x), max(h_tl_y, area_min_y),
+                min(c_br_x, area_max_x), min(c_tl_y, area_max_y))
+
+    def _draw_canvas_chrome(self, ctx, canvas_go, ref_w, ref_h,
+                            is_active, is_focused, alpha_mult, bounds):
+        """Draw canvas header bar and background rectangle."""
+        (c_tl_x, c_tl_y, c_br_x, c_br_y, h_tl_y,
+         v_tl_x, v_tl_y, v_br_x, v_br_y,
+         v_h_tl_x, v_h_tl_y, v_h_br_x, v_h_br_y) = bounds
+
+        header_visible = (v_h_br_x > v_h_tl_x and v_h_br_y > v_h_tl_y)
+        canvas_visible = (v_br_x > v_tl_x and v_br_y > v_tl_y)
+
+        if header_visible:
+            hdr_bg = Theme.UI_EDITOR_CANVAS_HEADER_BG_FOC if is_focused else Theme.UI_EDITOR_CANVAS_HEADER_BG
+            ctx.draw_filled_rect(v_h_tl_x, v_h_tl_y, v_h_br_x, v_h_br_y,
+                                 hdr_bg[0], hdr_bg[1], hdr_bg[2],
+                                 hdr_bg[3] * alpha_mult, 0.0)
+            label = f"{canvas_go.name}  {int(ref_w)}\u00d7{int(ref_h)}"
+            if not is_active:
+                label += "  (inactive)"
+            tc = Theme.UI_EDITOR_CANVAS_HEADER_TEXT
+            ctx.draw_text(c_tl_x + 6, h_tl_y + 3, label,
+                          tc[0], tc[1], tc[2], tc[3] * alpha_mult, 0.0)
+
+        if canvas_visible:
+            bg = Theme.UI_EDITOR_CANVAS_BG
+            ctx.draw_filled_rect(v_tl_x, v_tl_y, v_br_x, v_br_y,
+                                 bg[0], bg[1], bg[2], bg[3] * alpha_mult, 0.0)
+
+    def _hittest_canvas_hover(self, inp, canvas, canvas_go, is_active, is_focused,
+                              origin_x, origin_y, ref_w, ref_h, pick_tol, bounds,
+                              hovered_canvas_id, hovered_elem, hovered_all):
+        """Hit-test one canvas for hovered elements under the mouse."""
+        if not inp.area_hovered or self._dragging_canvas:
+            return hovered_canvas_id, hovered_elem, hovered_all
+
+        (c_tl_x, c_tl_y, c_br_x, c_br_y, h_tl_y, *_rest) = bounds
+        go_id = canvas_go.id
+
+        if c_tl_x <= inp.mouse_x <= c_br_x and h_tl_y <= inp.mouse_y <= c_br_y:
+            hovered_canvas_id = go_id
+            if (is_active and c_tl_y <= inp.mouse_y <= c_br_y
+                    and (is_focused or not self._focused_canvas_id)):
+                cmx, cmy = self._screen_to_canvas(inp.mouse_x, inp.mouse_y, origin_x, origin_y)
+                if 0.0 <= cmx <= ref_w and 0.0 <= cmy <= ref_h:
+                    _all = canvas.raycast_all(cmx, cmy, pick_tol)
                     if _all:
                         hovered_all = _all
                         hovered_elem = _all[0]
-                        if not hovered_canvas_id:
-                            hovered_canvas_id = go_id
 
-            # ── Skip element rendering for inactive canvases ──
-            if not is_active:
+        if is_focused and is_active and not hovered_elem:
+            cmx, cmy = self._screen_to_canvas(inp.mouse_x, inp.mouse_y, origin_x, origin_y)
+            _all = canvas.raycast_all(cmx, cmy, pick_tol)
+            if _all:
+                hovered_all = _all
+                hovered_elem = _all[0]
+                if not hovered_canvas_id:
+                    hovered_canvas_id = go_id
+
+        return hovered_canvas_id, hovered_elem, hovered_all
+
+    def _draw_canvas_elements(self, ctx, canvas, origin_x, origin_y,
+                              ref_w, ref_h, area, hovered_elem, _get_tid, UIText):
+        """Draw all UI elements for one active canvas."""
+        area_min_x, area_min_y, area_max_x, area_max_y = area
+        elements = list(canvas.iter_ui_elements())
+
+        for elem in elements:
+            if isinstance(elem, UIText):
+                self._sync_text_layout(ctx, elem)
+        clear_rect_cache(_pc())
+
+        for elem in elements:
+            elem_go = elem.game_object
+            if elem_go is not None and not elem_go.active_in_hierarchy:
+                continue
+            if not getattr(elem, 'enabled', True):
                 continue
 
-            # ── Draw UI elements ──
-            elements = list(canvas.iter_ui_elements())
+            ex, ey, ew, eh = elem.get_visual_rect(ref_w, ref_h)
+            base_x, base_y, base_w, base_h = elem.get_rect(ref_w, ref_h)
+            s_x, s_y = self._canvas_to_screen(ex, ey, origin_x, origin_y)
+            s_w = ew * self._zoom
+            s_h = eh * self._zoom
+            base_sx, base_sy = self._canvas_to_screen(base_x, base_y, origin_x, origin_y)
+            base_sw = base_w * self._zoom
+            base_sh = base_h * self._zoom
 
-            for elem in elements:
-                if isinstance(elem, UIText):
-                    self._sync_text_layout(ctx, elem)
-            clear_rect_cache(_pc())
+            s_x = round(s_x); s_y = round(s_y)
+            s_w = round(s_w); s_h = round(s_h)
 
-            for elem in elements:
-                elem_go = elem.game_object
-                if elem_go is not None and not elem_go.active_in_hierarchy:
-                    continue
-                if not getattr(elem, 'enabled', True):
-                    continue
+            is_hovered = (elem is hovered_elem)
+            is_selected = (elem is self._selected_element_comp)
 
-                ex, ey, ew, eh = elem.get_visual_rect(ref_w, ref_h)
-                base_x, base_y, base_w, base_h = elem.get_rect(ref_w, ref_h)
-                s_x, s_y = self._canvas_to_screen(ex, ey, origin_x, origin_y)
-                s_w = ew * self._zoom
-                s_h = eh * self._zoom
-                base_sx, base_sy = self._canvas_to_screen(base_x, base_y, origin_x, origin_y)
-                base_sw = base_w * self._zoom
-                base_sh = base_h * self._zoom
+            cx0 = max(s_x, area_min_x)
+            cy0 = max(s_y, area_min_y)
+            cx1 = min(s_x + s_w, area_max_x)
+            cy1 = min(s_y + s_h, area_max_y)
+            if cx1 <= cx0 or cy1 <= cy0:
+                continue
 
-                s_x = round(s_x)
-                s_y = round(s_y)
-                s_w = round(s_w)
-                s_h = round(s_h)
+            if not is_selected and is_hovered:
+                ctx.draw_filled_rect(cx0, cy0, cx1, cy1,
+                                     *Theme.UI_EDITOR_ELEMENT_HOVER, 0.0)
+                ctx.draw_rect(cx0, cy0, cx1, cy1,
+                              *Theme.UI_EDITOR_ELEMENT_SELECT[:3], 0.6, 1.0, 0.0)
 
-                is_hovered = (elem is hovered_elem)
-                is_selected = (elem is self._selected_element_comp)
+            if not _ui_dispatch(
+                elem, "editor",
+                ctx=ctx,
+                base_sx=base_sx, base_sy=base_sy,
+                base_sw=base_sw, base_sh=base_sh,
+                zoom=self._zoom,
+                get_tex_id=_get_tid,
+            ):
+                tx = max(s_x + 2, area_min_x)
+                ty = max(s_y + 2, area_min_y)
+                if tx < area_max_x and ty < area_max_y:
+                    ctx.draw_text(tx, ty,
+                                  elem.type_name, *Theme.UI_EDITOR_FALLBACK_TEXT, 0.0)
 
-                cx0 = max(s_x, area_min_x)
-                cy0 = max(s_y, area_min_y)
-                cx1 = min(s_x + s_w, area_max_x)
-                cy1 = min(s_y + s_h, area_max_y)
-                if cx1 <= cx0 or cy1 <= cy0:
-                    continue
-
-                if not is_selected and is_hovered:
-                    ctx.draw_filled_rect(cx0, cy0, cx1, cy1,
-                                         *Theme.UI_EDITOR_ELEMENT_HOVER, 0.0)
-                    ctx.draw_rect(cx0, cy0, cx1, cy1,
-                                  *Theme.UI_EDITOR_ELEMENT_SELECT[:3], 0.6, 1.0, 0.0)
-
-                if not _ui_dispatch(
-                    elem, "editor",
-                    ctx=ctx,
-                    base_sx=base_sx, base_sy=base_sy,
-                    base_sw=base_sw, base_sh=base_sh,
-                    zoom=self._zoom,
-                    get_tex_id=_get_tid,
-                ):
-                    tx = max(s_x + 2, area_min_x)
-                    ty = max(s_y + 2, area_min_y)
-                    if tx < area_max_x and ty < area_max_y:
-                        ctx.draw_text(tx, ty,
-                                      elem.type_name, *Theme.UI_EDITOR_FALLBACK_TEXT, 0.0)
-
-        # ── Fallback hit-test: focused canvas elements outside canvas bounds ──
-        if not hovered_elem and self._focused_canvas_id and area_hovered and not self._dragging_canvas:
-            for cgo, cv in all_canvases:
-                if cgo.id != self._focused_canvas_id:
-                    continue
-                if not cgo.active_in_hierarchy or not getattr(cv, 'enabled', True):
-                    break
-                pp = self._canvas_panel_positions.get(cgo.id, [0.0, 0.0])
-                foc_ox = area_min_x + pp[0] * self._zoom
-                foc_oy = area_min_y + pp[1] * self._zoom
-                cmx, cmy = self._screen_to_canvas(inp.mouse_x, inp.mouse_y, foc_ox, foc_oy)
-                _all = cv.raycast_all(cmx, cmy, _PICK_TOL)
-                if _all:
-                    hovered_all = _all
-                    hovered_elem = _all[0]
-                    if not hovered_canvas_id:
-                        hovered_canvas_id = cgo.id
+    def _fallback_focused_pick(self, inp, all_canvases, area_min_x, area_min_y,
+                               pick_tol, hovered_canvas_id, hovered_elem, hovered_all):
+        """Pick elements on the focused canvas even outside its bounds."""
+        for cgo, cv in all_canvases:
+            if cgo.id != self._focused_canvas_id:
+                continue
+            if not cgo.active_in_hierarchy or not getattr(cv, 'enabled', True):
                 break
+            pp = self._canvas_panel_positions.get(cgo.id, [0.0, 0.0])
+            foc_ox = area_min_x + pp[0] * self._zoom
+            foc_oy = area_min_y + pp[1] * self._zoom
+            cmx, cmy = self._screen_to_canvas(inp.mouse_x, inp.mouse_y, foc_ox, foc_oy)
+            _all = cv.raycast_all(cmx, cmy, pick_tol)
+            if _all:
+                hovered_all = _all
+                hovered_elem = _all[0]
+                if not hovered_canvas_id:
+                    hovered_canvas_id = cgo.id
+            break
+        return hovered_canvas_id, hovered_elem, hovered_all
 
-        # ══════════════════════════════════════════════════════════════
-        #  Selection overlay (focused canvas only)
-        # ══════════════════════════════════════════════════════════════
+    def _draw_selection_overlay(self, ctx, focused_canvas,
+                                foc_origin_x, foc_origin_y,
+                                foc_ref_w, foc_ref_h, area):
+        """Draw selection box, handles, and rotation affordance."""
+        area_min_x, area_min_y, area_max_x, area_max_y = area
         self._handle_positions = []
         self._draw_alignment_guides(ctx, foc_origin_x, foc_origin_y)
         if self._selected_element_comp is not None and focused_canvas is not None:
@@ -772,13 +830,8 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
         else:
             self._selection_geometry = None
 
-        ctx.pop_draw_list_clip_rect()
-
-        self._update_hover_cursor(ctx, area_hovered, inp.mouse_x, inp.mouse_y)
-
-        # ══════════════════════════════════════════════════════════════
-        #  Keyboard shortcuts
-        # ══════════════════════════════════════════════════════════════
+    def _process_keyboard_input(self, ctx, inp, focused_canvas, foc_ref_w, foc_ref_h):
+        """Handle keyboard shortcuts (deselect, delete, nudge)."""
         if inp.wants_deselect():
             self._select_element(None)
         if inp.wants_delete() and self._selected_element_comp is not None:
@@ -800,12 +853,70 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
             if dx != 0 or dy != 0:
                 self._nudge_selected(dx, dy, foc_ref_w, foc_ref_h)
 
-        self._handle_canvas_click(
-            ctx, inp, all_canvases,
-            hovered_canvas_id, hovered_elem, hovered_all,
-            foc_origin_x, foc_origin_y,
-            area_min_x, area_min_y,
-        )
+    def _begin_element_interaction(self, inp, all_canvases, hovered_canvas_id,
+                                    hovered_elem, foc_origin_x, foc_origin_y,
+                                    area_min_x, area_min_y):
+        """Start resize / rotate / drag on the selected element, or select a new one."""
+        foc_origin_x, foc_origin_y = self._get_focused_canvas_origin(
+            area_min_x, area_min_y, all_canvases)
+        _, focused_canvas = self._get_focused_canvas(all_canvases)
+        if focused_canvas is not None:
+            foc_ref_w = float(focused_canvas.reference_width)
+            foc_ref_h = float(focused_canvas.reference_height)
+        else:
+            foc_ref_w = foc_ref_h = 1.0
+
+        clicked_kind, clicked_handle = self._hit_test_handle(inp.mouse_x, inp.mouse_y)
+        if clicked_kind in ("corner", "edge") and self._selected_element_comp is not None:
+            self._resizing = True
+            self._resize_handle_idx = clicked_handle
+            self._resize_start_mx = inp.mouse_x
+            self._resize_start_my = inp.mouse_y
+            sel = self._selected_element_comp
+            self._prepare_resize_element(sel)
+            self._resize_start_rect = sel.get_rect(foc_ref_w, foc_ref_h)
+            self._resize_start_rotation = float(getattr(sel, 'rotation', 0.0))
+            self._resize_start_corners = sel.get_rotated_corners(foc_ref_w, foc_ref_h)
+            self._undo_pre_resize = (float(sel.x), float(sel.y),
+                                     float(sel.width), float(sel.height))
+        elif clicked_kind == "rotate" and self._selected_element_comp is not None:
+            self._rotating = True
+            self._dragging = False
+            self._resizing = False
+            self._resize_handle_idx = -1
+            sel = self._selected_element_comp
+            center_x, center_y = self._selection_geometry['center']
+            self._rotate_center_sx = center_x
+            self._rotate_center_sy = center_y
+            self._rotate_start_angle = math.degrees(
+                math.atan2(inp.mouse_y - center_y, inp.mouse_x - center_x))
+            self._rotate_start_rotation = float(getattr(sel, 'rotation', 0.0))
+            self._undo_pre_rotate = float(getattr(sel, 'rotation', 0.0))
+        elif clicked_kind == "inside" and self._selected_element_comp is not None:
+            sel = self._selected_element_comp
+            self._dragging = True
+            self._drag_start_x = inp.mouse_x
+            self._drag_start_y = inp.mouse_y
+            drag_x, drag_y, _, _ = sel.get_visual_rect(foc_ref_w, foc_ref_h)
+            self._drag_elem_start_x = drag_x
+            self._drag_elem_start_y = drag_y
+            self._undo_pre_drag = (float(sel.x), float(sel.y))
+        elif hovered_elem is not None:
+            self._select_element(hovered_elem)
+            self._dragging = True
+            self._drag_start_x = inp.mouse_x
+            self._drag_start_y = inp.mouse_y
+            drag_x, drag_y, _, _ = hovered_elem.get_visual_rect(foc_ref_w, foc_ref_h)
+            self._drag_elem_start_x = drag_x
+            self._drag_elem_start_y = drag_y
+            self._undo_pre_drag = (float(hovered_elem.x), float(hovered_elem.y))
+        elif hovered_canvas_id:
+            for cgo, _cv in all_canvases:
+                if cgo.id == hovered_canvas_id:
+                    self._select_canvas(cgo)
+                    break
+        else:
+            self._select_element(None)
 
     def _handle_canvas_click(
         self, ctx, inp, all_canvases,
@@ -866,66 +977,9 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
             if clicked_canvas_header is not None:
                 self._select_canvas(clicked_canvas_header)
             elif not self._dragging_canvas:
-                foc_origin_x, foc_origin_y = self._get_focused_canvas_origin(
-                    area_min_x, area_min_y, all_canvases)
-                _, focused_canvas = self._get_focused_canvas(all_canvases)
-                if focused_canvas is not None:
-                    foc_ref_w = float(focused_canvas.reference_width)
-                    foc_ref_h = float(focused_canvas.reference_height)
-                else:
-                    foc_ref_w = foc_ref_h = 1.0
-
-                clicked_kind, clicked_handle = self._hit_test_handle(inp.mouse_x, inp.mouse_y)
-                if clicked_kind in ("corner", "edge") and self._selected_element_comp is not None:
-                    self._resizing = True
-                    self._resize_handle_idx = clicked_handle
-                    self._resize_start_mx = inp.mouse_x
-                    self._resize_start_my = inp.mouse_y
-                    sel = self._selected_element_comp
-                    self._prepare_resize_element(sel)
-                    self._resize_start_rect = sel.get_rect(foc_ref_w, foc_ref_h)
-                    self._resize_start_rotation = float(getattr(sel, 'rotation', 0.0))
-                    self._resize_start_corners = sel.get_rotated_corners(foc_ref_w, foc_ref_h)
-                    self._undo_pre_resize = (float(sel.x), float(sel.y),
-                                             float(sel.width), float(sel.height))
-                elif clicked_kind == "rotate" and self._selected_element_comp is not None:
-                    self._rotating = True
-                    self._dragging = False
-                    self._resizing = False
-                    self._resize_handle_idx = -1
-                    sel = self._selected_element_comp
-                    center_x, center_y = self._selection_geometry['center']
-                    self._rotate_center_sx = center_x
-                    self._rotate_center_sy = center_y
-                    self._rotate_start_angle = math.degrees(
-                        math.atan2(inp.mouse_y - center_y, inp.mouse_x - center_x))
-                    self._rotate_start_rotation = float(getattr(sel, 'rotation', 0.0))
-                    self._undo_pre_rotate = float(getattr(sel, 'rotation', 0.0))
-                elif clicked_kind == "inside" and self._selected_element_comp is not None:
-                    sel = self._selected_element_comp
-                    self._dragging = True
-                    self._drag_start_x = inp.mouse_x
-                    self._drag_start_y = inp.mouse_y
-                    drag_x, drag_y, _, _ = sel.get_visual_rect(foc_ref_w, foc_ref_h)
-                    self._drag_elem_start_x = drag_x
-                    self._drag_elem_start_y = drag_y
-                    self._undo_pre_drag = (float(sel.x), float(sel.y))
-                elif hovered_elem is not None:
-                    self._select_element(hovered_elem)
-                    self._dragging = True
-                    self._drag_start_x = inp.mouse_x
-                    self._drag_start_y = inp.mouse_y
-                    drag_x, drag_y, _, _ = hovered_elem.get_visual_rect(foc_ref_w, foc_ref_h)
-                    self._drag_elem_start_x = drag_x
-                    self._drag_elem_start_y = drag_y
-                    self._undo_pre_drag = (float(hovered_elem.x), float(hovered_elem.y))
-                elif hovered_canvas_id:
-                    for cgo, _cv in all_canvases:
-                        if cgo.id == hovered_canvas_id:
-                            self._select_canvas(cgo)
-                            break
-                else:
-                    self._select_element(None)
+                self._begin_element_interaction(
+                    inp, all_canvases, hovered_canvas_id, hovered_elem,
+                    foc_origin_x, foc_origin_y, area_min_x, area_min_y)
 
     # ------------------------------------------------------------------
     # Snap helpers

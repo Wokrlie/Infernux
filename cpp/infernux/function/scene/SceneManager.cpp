@@ -420,6 +420,7 @@ void SceneManager::SyncExternalRigidbodyMoves()
 void SceneManager::ClearComponentRegistries()
 {
     m_activeMeshRenderers.clear();
+    m_activeMeshRendererSet.clear();
     m_activeLights.clear();
 }
 
@@ -431,17 +432,16 @@ void SceneManager::RegisterMeshRenderer(MeshRenderer *renderer)
 {
     if (!renderer)
         return;
-    // Avoid duplicates (OnEnable may be called more than once)
-    for (auto *r : m_activeMeshRenderers) {
-        if (r == renderer)
-            return;
+    if (m_activeMeshRendererSet.insert(renderer).second) {
+        m_activeMeshRenderers.push_back(renderer);
     }
-    m_activeMeshRenderers.push_back(renderer);
 }
 
 void SceneManager::UnregisterMeshRenderer(MeshRenderer *renderer)
 {
-    // Swap-and-pop for O(1) removal
+    if (!m_activeMeshRendererSet.erase(renderer))
+        return;
+    // Swap-and-pop for O(1) removal from vector
     for (size_t i = 0; i < m_activeMeshRenderers.size(); ++i) {
         if (m_activeMeshRenderers[i] == renderer) {
             m_activeMeshRenderers[i] = m_activeMeshRenderers.back();

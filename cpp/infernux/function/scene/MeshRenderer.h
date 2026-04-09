@@ -80,6 +80,12 @@ class MeshRenderer : public Component
     /// @brief Set mesh from inline vertex/index data (for primitives)
     void SetMesh(std::vector<Vertex> vertices, std::vector<uint32_t> indices);
 
+    /// @brief Set mesh from shared static primitive data (zero-copy).
+    /// The referenced vectors must outlive this MeshRenderer.
+    void SetSharedPrimitiveMesh(const std::vector<Vertex> &vertices,
+                                const std::vector<uint32_t> &indices,
+                                const std::string &primitiveName);
+
     /// @brief Get/set the display name for inline (primitive) meshes.
     [[nodiscard]] const std::string &GetInlineMeshName() const
     {
@@ -142,13 +148,13 @@ class MeshRenderer : public Component
     /// @brief Get inline vertex data
     [[nodiscard]] const std::vector<Vertex> &GetInlineVertices() const
     {
-        return m_inlineVertices;
+        return m_sharedVertices ? *m_sharedVertices : m_inlineVertices;
     }
 
     /// @brief Get inline index data
     [[nodiscard]] const std::vector<uint32_t> &GetInlineIndices() const
     {
-        return m_inlineIndices;
+        return m_sharedIndices ? *m_sharedIndices : m_inlineIndices;
     }
 
     // ========================================================================
@@ -277,6 +283,9 @@ class MeshRenderer : public Component
     /// @brief Get world-space bounding box (transformed by GameObject)
     void GetWorldBounds(glm::vec3 &outMin, glm::vec3 &outMax) const;
 
+    /// @brief Compute world bounds from a pre-computed world matrix (avoids double GetWorldMatrix)
+    void ComputeWorldBounds(const glm::mat4 &worldMatrix, glm::vec3 &outMin, glm::vec3 &outMax) const;
+
     /// @brief Recompute local bounds from inline vertex positions.
     void ComputeLocalBoundsFromInlineVertices();
 
@@ -304,6 +313,9 @@ class MeshRenderer : public Component
     // Inline mesh data (for primitives, not using resource system)
     std::vector<Vertex> m_inlineVertices;
     std::vector<uint32_t> m_inlineIndices;
+    // Shared primitive mesh data (zero-copy pointer to static data)
+    const std::vector<Vertex> *m_sharedVertices = nullptr;
+    const std::vector<uint32_t> *m_sharedIndices = nullptr;
     bool m_useInlineMesh = false;
     std::string m_inlineMeshName; // display name for inline (primitive) meshes
 

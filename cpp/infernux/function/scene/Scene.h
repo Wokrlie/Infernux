@@ -53,6 +53,9 @@ class Scene
     /// @brief Create a new empty GameObject in this scene
     GameObject *CreateGameObject(const std::string &name = "GameObject");
 
+    /// @brief Pre-allocate capacity for root objects and id map
+    void ReserveCapacity(size_t count);
+
     /// @brief Add an existing GameObject to this scene (takes ownership)
     void AddGameObject(std::unique_ptr<GameObject> gameObject);
 

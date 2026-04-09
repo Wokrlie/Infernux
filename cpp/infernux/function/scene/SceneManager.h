@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace infernux
@@ -280,6 +281,7 @@ class SceneManager
     // MeshRenderer component registry — populated by MeshRenderer OnEnable/OnDisable.
     // Avoids per-frame GetAllObjects() + dynamic_cast in CollectRenderables.
     std::vector<MeshRenderer *> m_activeMeshRenderers;
+    std::unordered_set<MeshRenderer *> m_activeMeshRendererSet; // O(1) duplicate check
 
     // Light component registry — populated by Light OnEnable/OnDisable.
     // Avoids per-frame GetAllObjects() + GetComponent<Light>() in CollectLights/ComputeShadowVP.

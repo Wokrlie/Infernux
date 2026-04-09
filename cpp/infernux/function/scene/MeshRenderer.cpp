@@ -163,9 +163,29 @@ void MeshRenderer::SetMesh(std::vector<Vertex> vertices, std::vector<uint32_t> i
     if (m_meshAsset.HasGuid())
         AssetDependencyGraph::Instance().RemoveDependency(GetInstanceGuid(), m_meshAsset.GetGuid());
 
+    m_sharedVertices = nullptr;
+    m_sharedIndices = nullptr;
     m_inlineVertices = std::move(vertices);
     m_inlineIndices = std::move(indices);
     m_useInlineMesh = true;
+    m_meshAsset.Clear();
+    m_meshBufferDirty = true;
+    ComputeLocalBoundsFromInlineVertices();
+}
+
+void MeshRenderer::SetSharedPrimitiveMesh(const std::vector<Vertex> &vertices,
+                                           const std::vector<uint32_t> &indices,
+                                           const std::string &primitiveName)
+{
+    if (m_meshAsset.HasGuid())
+        AssetDependencyGraph::Instance().RemoveDependency(GetInstanceGuid(), m_meshAsset.GetGuid());
+
+    m_inlineVertices.clear();
+    m_inlineIndices.clear();
+    m_sharedVertices = &vertices;
+    m_sharedIndices = &indices;
+    m_useInlineMesh = true;
+    m_inlineMeshName = primitiveName;
     m_meshAsset.Clear();
     m_meshBufferDirty = true;
     ComputeLocalBoundsFromInlineVertices();
@@ -182,6 +202,8 @@ void MeshRenderer::SetMeshAsset(const std::string &guid, std::shared_ptr<InxMesh
     m_meshBufferDirty = true;
     m_inlineVertices.clear();
     m_inlineIndices.clear();
+    m_sharedVertices = nullptr;
+    m_sharedIndices = nullptr;
 
     if (!guid.empty())
         graph.AddDependency(GetInstanceGuid(), guid);
@@ -208,6 +230,8 @@ void MeshRenderer::SetMeshAssetGuid(const std::string &guid)
     m_meshBufferDirty = true;
     m_inlineVertices.clear();
     m_inlineIndices.clear();
+    m_sharedVertices = nullptr;
+    m_sharedIndices = nullptr;
 
     if (!guid.empty())
         graph.AddDependency(GetInstanceGuid(), guid);
@@ -223,6 +247,8 @@ void MeshRenderer::ClearMeshAsset()
     m_useInlineMesh = false;
     m_inlineVertices.clear();
     m_inlineIndices.clear();
+    m_sharedVertices = nullptr;
+    m_sharedIndices = nullptr;
     m_localBoundsMin = glm::vec3(-0.5f);
     m_localBoundsMax = glm::vec3(0.5f);
 }
@@ -405,7 +431,8 @@ void MeshRenderer::SyncMaterialSlotsToMesh()
 
 void MeshRenderer::ComputeLocalBoundsFromInlineVertices()
 {
-    if (m_inlineVertices.empty()) {
+    const auto &verts = GetInlineVertices();
+    if (verts.empty()) {
         m_localBoundsMin = glm::vec3(-0.5f);
         m_localBoundsMax = glm::vec3(0.5f);
         return;
@@ -413,7 +440,7 @@ void MeshRenderer::ComputeLocalBoundsFromInlineVertices()
 
     glm::vec3 bmin(std::numeric_limits<float>::max());
     glm::vec3 bmax(std::numeric_limits<float>::lowest());
-    for (const auto &v : m_inlineVertices) {
+    for (const auto &v : verts) {
         bmin = glm::min(bmin, v.pos);
         bmax = glm::max(bmax, v.pos);
     }
@@ -463,6 +490,11 @@ void MeshRenderer::GetWorldBounds(glm::vec3 &outMin, glm::vec3 &outMax) const
 
     const Transform *transform = m_gameObject->GetTransform();
     glm::mat4 worldMatrix = transform->GetWorldMatrix();
+    ComputeWorldBounds(worldMatrix, outMin, outMax);
+}
+
+void MeshRenderer::ComputeWorldBounds(const glm::mat4 &worldMatrix, glm::vec3 &outMin, glm::vec3 &outMax) const
+{
 
     // Transform all 8 corners of the local AABB
     glm::vec3 corners[8] = {
@@ -500,10 +532,10 @@ std::string MeshRenderer::Serialize() const
     j["meshId"] = m_mesh.meshId;
 
     const bool builtinPrimitive = m_useInlineMesh && !m_inlineMeshName.empty() &&
-                                  MatchesBuiltinPrimitiveMesh(m_inlineMeshName, m_inlineVertices, m_inlineIndices);
+                                  MatchesBuiltinPrimitiveMesh(m_inlineMeshName, GetInlineVertices(), GetInlineIndices());
     const std::string matchedInlineMeshGuid =
         (!HasMeshAsset() && m_useInlineMesh && !builtinPrimitive)
-            ? FindMatchingMeshAssetGuid(m_inlineVertices, m_inlineIndices, m_inlineMeshName)
+            ? FindMatchingMeshAssetGuid(GetInlineVertices(), GetInlineIndices(), m_inlineMeshName)
             : std::string();
     const std::string serializedMeshGuid = HasMeshAsset() ? m_meshAsset.GetGuid() : matchedInlineMeshGuid;
 
@@ -554,7 +586,7 @@ std::string MeshRenderer::Serialize() const
             j["inlineMeshBuiltin"] = true;
         } else {
             json verticesJson = json::array();
-            for (const auto &v : m_inlineVertices) {
+            for (const auto &v : GetInlineVertices()) {
                 json vj;
                 vj["pos"] = {v.pos.x, v.pos.y, v.pos.z};
                 vj["normal"] = {v.normal.x, v.normal.y, v.normal.z};
@@ -566,7 +598,7 @@ std::string MeshRenderer::Serialize() const
             j["inlineVertices"] = verticesJson;
 
             json indicesJson = json::array();
-            for (uint32_t idx : m_inlineIndices) {
+            for (uint32_t idx : GetInlineIndices()) {
                 indicesJson.push_back(idx);
             }
             j["inlineIndices"] = indicesJson;
@@ -666,6 +698,8 @@ bool MeshRenderer::Deserialize(const std::string &jsonStr)
         m_inlineMeshName = j.value("inlineMeshName", std::string());
         m_inlineVertices.clear();
         m_inlineIndices.clear();
+        m_sharedVertices = nullptr;
+        m_sharedIndices = nullptr;
 
         if (m_useInlineMesh) {
             const bool isBuiltinPrimitive = j.value("inlineMeshBuiltin", false);
@@ -732,8 +766,12 @@ std::unique_ptr<Component> MeshRenderer::Clone() const
     // Inline mesh
     clone->m_useInlineMesh = m_useInlineMesh;
     clone->m_inlineMeshName = m_inlineMeshName;
-    clone->m_inlineVertices = m_inlineVertices;
-    clone->m_inlineIndices = m_inlineIndices;
+    clone->m_sharedVertices = m_sharedVertices;
+    clone->m_sharedIndices = m_sharedIndices;
+    if (!m_sharedVertices) {
+        clone->m_inlineVertices = m_inlineVertices;
+        clone->m_inlineIndices = m_inlineIndices;
+    }
     // Materials
     clone->m_materials = m_materials;
     // Rendering flags

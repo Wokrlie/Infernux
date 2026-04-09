@@ -79,6 +79,11 @@ class Engine():
         )
         self._apply_startup_present_mode()
         set_project_root(project_path)
+
+        # Synchronize C++ scene-view flag with Python's initial state.
+        # C++ defaults to false; editor sets True, player keeps False.
+        self._engine.set_scene_view_visible(bool(self._scene_view_visible))
+
         if not _PLAYER_MODE:
             self._resources_manager = ResourcesManager(
                 project_path=project_path, engine=self._engine

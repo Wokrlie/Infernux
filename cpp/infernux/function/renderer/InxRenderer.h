@@ -188,10 +188,7 @@ class InxRenderer
     void SetGameCameraEnabled(bool enabled);
 
     /// @brief Enable/disable scene view rendering (called by Python panel visibility)
-    void SetSceneViewVisible(bool visible)
-    {
-        m_sceneViewVisible = visible;
-    }
+    void SetSceneViewVisible(bool visible);
     [[nodiscard]] bool IsSceneViewVisible() const
     {
         return m_sceneViewVisible;
@@ -343,7 +340,7 @@ class InxRenderer
     std::unique_ptr<SceneRenderGraph> m_gameRenderGraph;
     std::unique_ptr<InxScreenUIRenderer> m_screenUIRenderer;
     bool m_gameCameraEnabled = false;
-    bool m_sceneViewVisible = true;  ///< Set from Python scene_view_panel visibility
+    bool m_sceneViewVisible = false;  ///< Default false; Python editor sets true via SetSceneViewVisible()
     double m_lastGameRenderMs = 0.0; ///< Per-frame game render time (CPU command recording)
     double m_sceneUpdateMs = 0.0;    ///< SceneManager::Update + LateUpdate (ms)
     double m_guiBuildMs = 0.0;       ///< GUI::BuildFrame (all ImGui panels) (ms)

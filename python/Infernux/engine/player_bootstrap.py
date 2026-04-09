@@ -122,6 +122,12 @@ class PlayerBootstrap:
         self.engine.init_renderer(
             width=w, height=h, project_path=self.project_path
         )
+
+        # Explicitly tell C++ we are in player mode — no scene view rendering.
+        # The C++ default is m_sceneViewVisible=true; without this call the
+        # renderer would execute both scene and game render graphs every frame.
+        self.engine.set_scene_view_visible(False)
+
         self.engine.set_gui_font(_resources.engine_font_path, 15)
 
 

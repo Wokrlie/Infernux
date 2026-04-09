@@ -218,105 +218,30 @@ def get_shader_candidates(ext: str, cache: dict = None):
     return items
 
 
-def sync_properties_from_shader(mat_data: dict, shader_id: str, ext: str,
+_SHADER_TYPE_MAP = {
+    'Float': 0,
+    'Float2': 1,
+    'Float3': 2,
+    'Float4': 3,
+    'Color': 7,
+    'Int': 4,
+    'Mat4': 5,
+    'Texture2D': 6,
+}
+
+
+def _apply_shader_props_to_mat(mat_data: dict, all_props: list[dict],
                                 remove_unknown: bool = False):
-    """Sync material properties from shader's @property annotations.
-    Adds new properties from shader, keeps existing values if property exists.
-    If *remove_unknown* is True, removes properties not defined in shader.
+    """Apply a merged list of shader @property dicts to mat_data.
+
+    Shared implementation for `sync_properties_from_shader` and
+    `sync_all_shader_properties`.
     """
-    shader_props = _get_shader_properties_cached(shader_id, ext)
-    if not shader_props:
-        # Shader file may be temporarily incomplete during hot-reload.
-        # Do NOT clear properties or ordering metadata — preserve existing
-        # state so the inspector doesn't flicker.
-        return
-
-    type_map = {
-        'Float': 0,
-        'Float2': 1,
-        'Float3': 2,
-        'Float4': 3,
-        'Color': 7,
-        'Int': 4,
-        'Mat4': 5,
-        'Texture2D': 6
-    }
-
-    props = mat_data.setdefault("properties", {})
-    mat_data["_shader_property_order"] = [sp.get('name', '') for sp in shader_props if sp.get('name')]
-    shader_prop_names = set()
-
-    for sp in shader_props:
-        name = sp.get('name', '')
-        ptype_str = sp.get('type', 'Float')
-        default = sp.get('default')
-        hdr = sp.get('hdr', False)
-
-        if not name:
-            continue
-
-        shader_prop_names.add(name)
-        ptype = type_map.get(ptype_str, 0)
-
-        if name in props:
-            props[name]['type'] = ptype
-            props[name]['hdr'] = hdr
-        else:
-            # Texture2D: use 'guid' key (not 'value') with empty string
-            # to indicate no texture assigned. The GPU descriptor system
-            # selects the appropriate fallback (white / flat-normal)
-            # based on the binding name.
-            if ptype == 6:
-                props[name] = {
-                    'type': ptype,
-                    'guid': "",
-                    'hdr': hdr,
-                }
-            else:
-                props[name] = {
-                    'type': ptype,
-                    'value': default,
-                    'hdr': hdr,
-                }
-
-    if remove_unknown:
-        props_to_remove = [k for k in props if k not in shader_prop_names]
-        for k in props_to_remove:
-            del props[k]
-
-
-def sync_all_shader_properties(mat_data: dict, vert_shader_id: str, frag_shader_id: str,
-                               remove_unknown: bool = False):
-    """Sync material properties from both vertex and fragment shader annotations.
-
-    Merges @property annotations from both shaders.  Vertex properties appear
-    first in the display order, followed by fragment properties.
-    If *remove_unknown* is True, removes properties not defined in either shader.
-    """
-    type_map = {
-        'Float': 0,
-        'Float2': 1,
-        'Float3': 2,
-        'Float4': 3,
-        'Color': 7,
-        'Int': 4,
-        'Mat4': 5,
-        'Texture2D': 6
-    }
-
-    all_props: list[dict] = []
-
-    if vert_shader_id:
-        all_props.extend(_get_shader_properties_cached(vert_shader_id, ".vert"))
-
-    if frag_shader_id:
-        all_props.extend(_get_shader_properties_cached(frag_shader_id, ".frag"))
-
     if not all_props:
         return
 
     props = mat_data.setdefault("properties", {})
-    # Combined ordering: vert properties first, then frag (deduped)
+
     seen_names: set[str] = set()
     ordered_names: list[str] = []
     for sp in all_props:
@@ -337,29 +262,51 @@ def sync_all_shader_properties(mat_data: dict, vert_shader_id: str, frag_shader_
             continue
 
         shader_prop_names.add(name)
-        ptype = type_map.get(ptype_str, 0)
+        ptype = _SHADER_TYPE_MAP.get(ptype_str, 0)
 
         if name in props:
             props[name]['type'] = ptype
             props[name]['hdr'] = hdr
         else:
             if ptype == 6:
-                props[name] = {
-                    'type': ptype,
-                    'guid': "",
-                    'hdr': hdr,
-                }
+                props[name] = {'type': ptype, 'guid': "", 'hdr': hdr}
             else:
-                props[name] = {
-                    'type': ptype,
-                    'value': default,
-                    'hdr': hdr,
-                }
+                props[name] = {'type': ptype, 'value': default, 'hdr': hdr}
 
     if remove_unknown:
-        props_to_remove = [k for k in props if k not in shader_prop_names]
-        for k in props_to_remove:
+        for k in [k for k in props if k not in shader_prop_names]:
             del props[k]
+
+
+def sync_properties_from_shader(mat_data: dict, shader_id: str, ext: str,
+                                remove_unknown: bool = False):
+    """Sync material properties from shader's @property annotations.
+    Adds new properties from shader, keeps existing values if property exists.
+    If *remove_unknown* is True, removes properties not defined in shader.
+    """
+    shader_props = _get_shader_properties_cached(shader_id, ext)
+    if not shader_props:
+        # Shader file may be temporarily incomplete during hot-reload.
+        # Do NOT clear properties or ordering metadata — preserve existing
+        # state so the inspector doesn't flicker.
+        return
+    _apply_shader_props_to_mat(mat_data, shader_props, remove_unknown=remove_unknown)
+
+
+def sync_all_shader_properties(mat_data: dict, vert_shader_id: str, frag_shader_id: str,
+                               remove_unknown: bool = False):
+    """Sync material properties from both vertex and fragment shader annotations.
+
+    Merges @property annotations from both shaders.  Vertex properties appear
+    first in the display order, followed by fragment properties.
+    If *remove_unknown* is True, removes properties not defined in either shader.
+    """
+    all_props: list[dict] = []
+    if vert_shader_id:
+        all_props.extend(_get_shader_properties_cached(vert_shader_id, ".vert"))
+    if frag_shader_id:
+        all_props.extend(_get_shader_properties_cached(frag_shader_id, ".frag"))
+    _apply_shader_props_to_mat(mat_data, all_props, remove_unknown=remove_unknown)
 
 
 def get_all_shader_property_names(vert_shader_id: str, frag_shader_id: str) -> list[str]:

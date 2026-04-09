@@ -79,53 +79,96 @@ enum class PrimitiveType
 };
 
 /**
+ * @brief Resolve static primitive mesh data (zero-copy reference).
+ */
+static void GetPrimitiveMeshData(PrimitiveType type,
+                                 const std::vector<Vertex> *&outVertices,
+                                 const std::vector<uint32_t> *&outIndices,
+                                 const char *&outDefaultName)
+{
+    switch (type) {
+    case PrimitiveType::Cube:
+        outVertices = &PrimitiveMeshes::GetCubeVertices();
+        outIndices = &PrimitiveMeshes::GetCubeIndices();
+        outDefaultName = "Cube";
+        break;
+    case PrimitiveType::Sphere:
+        outVertices = &PrimitiveMeshes::GetSphereVertices();
+        outIndices = &PrimitiveMeshes::GetSphereIndices();
+        outDefaultName = "Sphere";
+        break;
+    case PrimitiveType::Capsule:
+        outVertices = &PrimitiveMeshes::GetCapsuleVertices();
+        outIndices = &PrimitiveMeshes::GetCapsuleIndices();
+        outDefaultName = "Capsule";
+        break;
+    case PrimitiveType::Cylinder:
+        outVertices = &PrimitiveMeshes::GetCylinderVertices();
+        outIndices = &PrimitiveMeshes::GetCylinderIndices();
+        outDefaultName = "Cylinder";
+        break;
+    case PrimitiveType::Plane:
+        outVertices = &PrimitiveMeshes::GetPlaneVertices();
+        outIndices = &PrimitiveMeshes::GetPlaneIndices();
+        outDefaultName = "Plane";
+        break;
+    }
+}
+
+/**
  * @brief Helper function to create a primitive GameObject.
  */
 static GameObject *CreatePrimitiveObject(Scene *scene, PrimitiveType type, const std::string &name = "")
 {
-    std::string objectName;
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
+    const std::vector<Vertex> *vertices = nullptr;
+    const std::vector<uint32_t> *indices = nullptr;
+    const char *defaultName = "Primitive";
+    GetPrimitiveMeshData(type, vertices, indices, defaultName);
 
-    switch (type) {
-    case PrimitiveType::Cube:
-        objectName = name.empty() ? "Cube" : name;
-        vertices =
-            std::vector<Vertex>(PrimitiveMeshes::GetCubeVertices().begin(), PrimitiveMeshes::GetCubeVertices().end());
-        indices =
-            std::vector<uint32_t>(PrimitiveMeshes::GetCubeIndices().begin(), PrimitiveMeshes::GetCubeIndices().end());
-        break;
-    case PrimitiveType::Sphere:
-        objectName = name.empty() ? "Sphere" : name;
-        vertices = PrimitiveMeshes::GetSphereVertices();
-        indices = PrimitiveMeshes::GetSphereIndices();
-        break;
-    case PrimitiveType::Capsule:
-        objectName = name.empty() ? "Capsule" : name;
-        vertices = PrimitiveMeshes::GetCapsuleVertices();
-        indices = PrimitiveMeshes::GetCapsuleIndices();
-        break;
-    case PrimitiveType::Cylinder:
-        objectName = name.empty() ? "Cylinder" : name;
-        vertices = PrimitiveMeshes::GetCylinderVertices();
-        indices = PrimitiveMeshes::GetCylinderIndices();
-        break;
-    case PrimitiveType::Plane:
-        objectName = name.empty() ? "Plane" : name;
-        vertices = PrimitiveMeshes::GetPlaneVertices();
-        indices = PrimitiveMeshes::GetPlaneIndices();
-        break;
-    }
+    const std::string objectName = name.empty() ? defaultName : name;
 
     GameObject *obj = scene->CreateGameObject(objectName);
     if (obj) {
         MeshRenderer *renderer = obj->AddComponent<MeshRenderer>();
         if (renderer) {
-            renderer->SetMesh(std::move(vertices), std::move(indices));
-            renderer->SetInlineMeshName(objectName);
+            renderer->SetSharedPrimitiveMesh(*vertices, *indices, objectName);
         }
     }
     return obj;
+}
+
+/**
+ * @brief Batch-create N primitive GameObjects with pre-reserved capacity.
+ * Returns a Python list of GameObjects.
+ */
+static py::list CreatePrimitiveObjectsBatch(Scene *scene, PrimitiveType type, size_t count,
+                                            const std::string &namePrefix = "")
+{
+    const std::vector<Vertex> *vertices = nullptr;
+    const std::vector<uint32_t> *indices = nullptr;
+    const char *defaultName = "Primitive";
+    GetPrimitiveMeshData(type, vertices, indices, defaultName);
+
+    const std::string prefix = namePrefix.empty() ? defaultName : namePrefix;
+
+    // Pre-allocate capacity to avoid incremental vector growth.
+    scene->ReserveCapacity(count);
+    TransformECSStore::Instance().Reserve(
+        TransformECSStore::Instance().Capacity() + count);
+
+    py::list result(count);
+    for (size_t i = 0; i < count; ++i) {
+        std::string objName = prefix + "_" + std::to_string(i);
+        GameObject *obj = scene->CreateGameObject(objName);
+        if (obj) {
+            MeshRenderer *renderer = obj->AddComponent<MeshRenderer>();
+            if (renderer) {
+                renderer->SetSharedPrimitiveMesh(*vertices, *indices, prefix);
+            }
+        }
+        result[i] = py::cast(obj, py::return_value_policy::reference);
+    }
+    return result;
 }
 
 /**
@@ -1315,6 +1358,13 @@ void RegisterSceneBindings(py::module_ &m)
             },
             py::return_value_policy::reference, py::arg("type"), py::arg("name") = "",
             "Create a primitive GameObject (Cube, Sphere, Capsule, Cylinder, Plane)")
+        .def(
+            "create_primitives_batch",
+            [](Scene *scene, PrimitiveType type, size_t count, const std::string &namePrefix) {
+                return CreatePrimitiveObjectsBatch(scene, type, count, namePrefix);
+            },
+            py::arg("type"), py::arg("count"), py::arg("name_prefix") = "",
+            "Batch-create N primitive GameObjects. Returns a list of GameObjects.")
         .def(
             "create_from_model",
             [](Scene *scene, const std::string &guid, const std::string &name) {
