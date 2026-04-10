@@ -82,6 +82,10 @@
             "configurePreset": "debug-macos"
         },
         {
+            "name": "debug-linux",
+            "configurePreset": "debug-linux"
+        },
+        {
             "name": "format",
             "configurePreset": "release",
             "configuration": "Release",
