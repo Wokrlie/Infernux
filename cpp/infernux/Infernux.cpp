@@ -312,7 +312,9 @@ void Infernux::InitRenderer(int width, int height, const std::string &projectPat
                                [](const std::string &dependentGuid, const std::string & /*matGuid*/, AssetEvent event) {
                                    if (event != AssetEvent::Deleted)
                                        return;
-                                   auto *comp = Component::FindByInstanceGuid(dependentGuid);
+                                   uint64_t compId = 0;
+                                   try { compId = std::stoull(dependentGuid); } catch (...) { return; }
+                                   auto *comp = Component::FindByComponentId(compId);
                                    if (!comp)
                                        return;
                                    auto *mr = dynamic_cast<MeshRenderer *>(comp);
@@ -326,7 +328,9 @@ void Infernux::InitRenderer(int width, int height, const std::string &projectPat
 
         graph.RegisterCallback(ResourceType::Mesh, [](const std::string &dependentGuid,
                                                       const std::string & /*meshGuid*/, AssetEvent event) {
-            auto *comp = Component::FindByInstanceGuid(dependentGuid);
+            uint64_t compId = 0;
+            try { compId = std::stoull(dependentGuid); } catch (...) { return; }
+            auto *comp = Component::FindByComponentId(compId);
             if (!comp)
                 return;
             auto *mr = dynamic_cast<MeshRenderer *>(comp);

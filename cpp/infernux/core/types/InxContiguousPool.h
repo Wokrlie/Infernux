@@ -94,6 +94,12 @@ template <typename T> class InxContiguousPool
         return m_aliveCount;
     }
 
+    /// Pre-allocate storage for at least @p n total slots.
+    void Reserve(size_t n)
+    {
+        m_slots.reserve(n);
+    }
+
     [[nodiscard]] const std::vector<Handle> GetAliveHandles() const
     {
         std::vector<Handle> handles;
