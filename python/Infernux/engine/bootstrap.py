@@ -13,6 +13,7 @@ import os
 import pathlib
 from typing import Optional
 
+from Infernux.debug import Debug
 from Infernux.lib import TagLayerManager
 import Infernux.resources as _resources
 from Infernux.engine.engine import Engine, LogLevel
