@@ -18,6 +18,7 @@
 #include "function/scene/GameObject.h"
 #include "function/scene/MeshCollider.h"
 #include "function/scene/Rigidbody.h"
+#include "function/scene/SceneManager.h"
 #include "function/scene/SphereCollider.h"
 #include "function/scene/TagLayerManager.h"
 #include "function/scene/physics/PhysicsContactListener.h"
@@ -436,7 +437,17 @@ void RegisterPhysicsBindings(py::module_ &m)
             [](int layer1, int layer2) -> bool {
                 return !TagLayerManager::Instance().GetLayersCollide(layer1, layer2);
             },
-            "layer1"_a, "layer2"_a, "Check if two layers ignore collisions.");
+            "layer1"_a, "layer2"_a, "Check if two layers ignore collisions.")
+        // ---- Transform sync (Unity: Physics.SyncTransforms) ----
+        .def_static(
+            "sync_transforms",
+            []() {
+                SceneManager::Instance().SyncTransforms();
+            },
+            "Apply all pending Transform changes to the physics engine.\n"
+            "Call before same-frame physics queries (raycast, overlap) when you have\n"
+            "moved objects in Update and need up-to-date collision geometry.\n"
+            "Unity equivalent: Physics.SyncTransforms()");
 
     // ====================================================================
     // Register component type casters in ComponentBindingRegistry

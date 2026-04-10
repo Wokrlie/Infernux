@@ -101,6 +101,10 @@ class PhysicsWorld
     /// Add an existing body to the broadphase (visible to raycasts/queries).
     void AddBodyToBroadphase(uint32_t bodyId, bool isStatic);
 
+    /// Batch-add bodies to the broadphase using Jolt's AddBodiesPrepare/Finalize.
+    /// Much faster than individual AddBodyToBroadphase for large batches (10k+).
+    void AddBodiesBatch(const std::vector<std::pair<uint32_t, bool>> &bodies);
+
     /// Remove a body from the broadphase (body stays alive for re-adding later).
     void RemoveBodyFromBroadphase(uint32_t bodyId);
 

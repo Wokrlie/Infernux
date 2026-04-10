@@ -5,10 +5,9 @@
 #include "Transform.h"
 #include <InxLog.h>
 #include <atomic>
-#include <iomanip>
+#include <cstdio>
 #include <nlohmann/json.hpp>
 #include <random>
-#include <sstream>
 
 using json = nlohmann::json;
 
@@ -213,9 +212,11 @@ std::string Component::GenerateInstanceGuid()
     std::uniform_int_distribution<uint64_t> dist;
     uint64_t hi = dist(gen);
     uint64_t lo = dist(gen);
-    std::ostringstream ss;
-    ss << "inst_" << std::hex << std::setfill('0') << std::setw(16) << hi << std::setw(16) << lo;
-    return ss.str();
+    char buf[40]; // "inst_" (5) + 16 + 16 + '\0' = 38
+    std::snprintf(buf, sizeof(buf), "inst_%016llx%016llx",
+                  static_cast<unsigned long long>(hi),
+                  static_cast<unsigned long long>(lo));
+    return std::string(buf, 37);
 }
 
 std::unordered_map<std::string, Component *> &Component::GetInstanceRegistry()

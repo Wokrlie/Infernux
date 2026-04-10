@@ -5,6 +5,8 @@
 
 #include "PhysicsECSStore.h"
 
+#include <algorithm>
+
 namespace infernux
 {
 
@@ -99,6 +101,85 @@ RigidbodyECSData &PhysicsECSStore::GetRigidbody(RigidbodyHandle handle)
 const RigidbodyECSData &PhysicsECSStore::GetRigidbody(RigidbodyHandle handle) const
 {
     return m_rigidbodyPool.Get(handle);
+}
+
+// ============================================================================
+// Dirty collider tracking
+// ============================================================================
+
+void PhysicsECSStore::MarkColliderDirty(ColliderHandle handle)
+{
+    if (m_colliderPool.IsAlive(handle)) {
+        if (m_dirtyColliderSet.insert(handle.index).second)
+            m_dirtyColliderList.push_back(handle);
+    }
+}
+
+std::vector<PhysicsECSStore::ColliderHandle> PhysicsECSStore::ConsumeDirtyColliders()
+{
+    std::vector<ColliderHandle> result;
+    result.swap(m_dirtyColliderList);
+    m_dirtyColliderSet.clear();
+    // Filter out any that died between mark and consume
+    result.erase(std::remove_if(result.begin(), result.end(),
+                                [this](const ColliderHandle &h) { return !m_colliderPool.IsAlive(h); }),
+                 result.end());
+    return result;
+}
+
+void PhysicsECSStore::MarkAllCollidersDirty()
+{
+    m_dirtyColliderList.clear();
+    m_dirtyColliderSet.clear();
+    auto handles = m_colliderPool.GetAliveHandles();
+    m_dirtyColliderList.reserve(handles.size());
+    for (auto &h : handles) {
+        m_dirtyColliderList.push_back(h);
+        m_dirtyColliderSet.insert(h.index);
+    }
+}
+
+// ============================================================================
+// Pending body creation queue
+// ============================================================================
+
+void PhysicsECSStore::QueueBodyCreation(ColliderHandle handle)
+{
+    if (m_colliderPool.IsAlive(handle)) {
+        if (m_pendingBodyCreationSet.insert(handle.index).second)
+            m_pendingBodyCreationList.push_back(handle);
+    }
+}
+
+std::vector<PhysicsECSStore::ColliderHandle> PhysicsECSStore::ConsumePendingBodyCreations()
+{
+    std::vector<ColliderHandle> result;
+    result.swap(m_pendingBodyCreationList);
+    m_pendingBodyCreationSet.clear();
+    result.erase(std::remove_if(result.begin(), result.end(),
+                                [this](const ColliderHandle &h) { return !m_colliderPool.IsAlive(h); }),
+                 result.end());
+    return result;
+}
+
+// ============================================================================
+// Pending broadphase queue
+// ============================================================================
+
+void PhysicsECSStore::QueueBroadphaseAdd(uint32_t bodyId, bool isStatic)
+{
+    if (bodyId == 0xFFFFFFFF)
+        return;
+    if (m_pendingBroadphaseSet.insert(bodyId).second)
+        m_pendingBroadphaseAdds.push_back({bodyId, isStatic});
+}
+
+std::vector<std::pair<uint32_t, bool>> PhysicsECSStore::ConsumePendingBroadphaseAdds()
+{
+    std::vector<std::pair<uint32_t, bool>> result;
+    result.swap(m_pendingBroadphaseAdds);
+    m_pendingBroadphaseSet.clear();
+    return result;
 }
 
 } // namespace infernux

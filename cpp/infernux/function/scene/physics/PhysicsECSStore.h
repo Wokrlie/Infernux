@@ -12,6 +12,8 @@
 #include "core/types/InxContiguousPool.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <unordered_set>
+#include <vector>
 
 namespace infernux
 {
@@ -106,6 +108,46 @@ class PhysicsECSStore
         return m_colliderPool.GetAliveHandles();
     }
 
+    // ---- Dirty collider tracking (Unity-style deferred sync) ----
+
+    /// Mark a collider as needing transform→physics sync before the next physics step.
+    void MarkColliderDirty(ColliderHandle handle);
+
+    /// Consume the dirty set.  Returns handles that were dirty (moved since last flush).
+    /// Clears the internal set atomically.
+    std::vector<ColliderHandle> ConsumeDirtyColliders();
+
+    /// True if any collider has been marked dirty since last consume.
+    [[nodiscard]] bool HasDirtyColliders() const { return !m_dirtyColliderSet.empty(); }
+
+    /// Mark all alive colliders dirty (used for force-sync scenarios).
+    void MarkAllCollidersDirty();
+
+    // ---- Pending body creation queue (deferred from Collider::Awake) ----
+
+    /// Queue a collider for deferred Jolt body creation at the next pre-physics flush.
+    /// This is the main batch-creation optimization: add_component("BoxCollider")
+    /// becomes near-zero cost during the Python loop; the actual Jolt body is
+    /// created in SceneManager::FlushPendingBroadphase().
+    void QueueBodyCreation(ColliderHandle handle);
+
+    /// Consume pending body creation queue.  Returns handles (dead entries filtered).
+    std::vector<ColliderHandle> ConsumePendingBodyCreations();
+
+    /// True if any colliders are waiting for body creation.
+    [[nodiscard]] bool HasPendingBodyCreations() const { return !m_pendingBodyCreationSet.empty(); }
+
+    // ---- Pending broadphase queue (deferred body activation) ----
+
+    /// Queue a body ID for batch broadphase addition at next flush.
+    void QueueBroadphaseAdd(uint32_t bodyId, bool isStatic);
+
+    /// Consume pending broadphase additions.  Returns pairs of (bodyId, isStatic).
+    std::vector<std::pair<uint32_t, bool>> ConsumePendingBroadphaseAdds();
+
+    /// True if any bodies are waiting to be added to the broadphase.
+    [[nodiscard]] bool HasPendingBroadphaseAdds() const { return !m_pendingBroadphaseAdds.empty(); }
+
     // ---- Rigidbody pool ----
     RigidbodyHandle AllocateRigidbody(Rigidbody *owner);
     void ReleaseRigidbody(RigidbodyHandle handle);
@@ -122,6 +164,18 @@ class PhysicsECSStore
 
     InxContiguousPool<ColliderECSData> m_colliderPool;
     InxContiguousPool<RigidbodyECSData> m_rigidbodyPool;
+
+    // Dirty collider tracking — colliders whose Transform changed and need physics sync.
+    std::vector<ColliderHandle> m_dirtyColliderList;
+    std::unordered_set<uint32_t> m_dirtyColliderSet; // index dedup
+
+    // Pending body creation queue — colliders that deferred RegisterBody.
+    std::vector<ColliderHandle> m_pendingBodyCreationList;
+    std::unordered_set<uint32_t> m_pendingBodyCreationSet; // index dedup
+
+    // Pending broadphase add queue — (bodyId, isStatic) pairs.
+    std::vector<std::pair<uint32_t, bool>> m_pendingBroadphaseAdds;
+    std::unordered_set<uint32_t> m_pendingBroadphaseSet; // deduplicate
 };
 
 } // namespace infernux

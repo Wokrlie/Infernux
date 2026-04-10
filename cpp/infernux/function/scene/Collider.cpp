@@ -45,7 +45,7 @@ Collider::~Collider()
 void Collider::Awake()
 {
     // If a sibling Rigidbody already exists and is enabled, cache it before
-    // RegisterBody() so the body is created as dynamic/kinematic instead of
+    // body creation so the body is created as dynamic/kinematic instead of
     // static.  This handles the case where the Collider is added *after* the
     // Rigidbody (whose OnEnable already ran and won't re-fire).
     if (auto *go = GetGameObject()) {
@@ -57,15 +57,23 @@ void Collider::Awake()
     if (!Data().deserialized) {
         AutoFitToMesh();
     }
-    RegisterBody();
+
+    // Defer body creation to the next pre-physics flush (Unity-style).
+    // This is the key batch-creation optimization: add_component("BoxCollider")
+    // in a Python loop becomes near-zero physics cost; the actual Jolt bodies
+    // are created in one batch inside SceneManager::FlushPendingBroadphase().
+    PhysicsECSStore::Instance().QueueBodyCreation(m_ecsHandle);
 }
 
 void Collider::OnEnable()
 {
-    RegisterBody();
-    if (Data().bodyId != 0xFFFFFFFF) {
-        PhysicsWorld::Instance().UpdateBodyShape(this);
+    if (Data().bodyId == 0xFFFFFFFF) {
+        // Body not yet created (deferred from Awake) — ensure it's queued.
+        PhysicsECSStore::Instance().QueueBodyCreation(m_ecsHandle);
+        return;
     }
+    // Re-enable after disable — body already exists, normal path.
+    PhysicsWorld::Instance().UpdateBodyShape(this);
     AddToBroadphase();
 }
 
@@ -422,7 +430,10 @@ void Collider::AddToBroadphase()
 
     bool isStatic = (d.cachedRigidbody == nullptr || !d.cachedRigidbody->IsEnabled());
 
-    PhysicsWorld::Instance().AddBodyToBroadphase(d.bodyId, isStatic);
+    // Defer broadphase addition to the next pre-physics flush (Unity-style).
+    // The body exists in Jolt but won't participate in queries/simulation
+    // until SceneManager flushes the pending queue.
+    PhysicsECSStore::Instance().QueueBroadphaseAdd(d.bodyId, isStatic);
     d.bodyInBroadphase = true;
 
     if (go) {
